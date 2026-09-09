@@ -75,7 +75,24 @@ class DoomscrollRepository private constructor(context: Context) {
     fun rulesForPackage(packageName: String): Flow<List<ContextRuleEntity>> =
         db.contextRules().observeForPackage(packageName)
 
-    suspend fun addRule(rule: ContextRuleEntity): Long = db.contextRules().insert(rule)
+    /**
+     * Inserting the exact same rule twice is a real path, not just a theoretical one: Learn
+     * Mode's "promote to rule" and the manual Add rule form both call this directly, and
+     * re-running Learn Mode on a screen already taught (or double-tapping the button) is an
+     * easy accident. There's no unique constraint on the table, so nothing else stops it -
+     * silently no-op on an exact duplicate rather than growing a second identical row every
+     * time.
+     */
+    suspend fun addRule(rule: ContextRuleEntity): Long {
+        val exists = db.contextRules().getAll().any {
+            it.packageName == rule.packageName &&
+                it.kind == rule.kind &&
+                it.matchType == rule.matchType &&
+                it.pattern == rule.pattern
+        }
+        if (exists) return -1
+        return db.contextRules().insert(rule)
+    }
     suspend fun updateRule(rule: ContextRuleEntity) = db.contextRules().update(rule)
     suspend fun deleteRule(rule: ContextRuleEntity) = db.contextRules().delete(rule)
 
@@ -100,8 +117,14 @@ class DoomscrollRepository private constructor(context: Context) {
     fun observeReasonsFor(packageName: String): Flow<List<ReasonEntity>> =
         db.reasons().observeForPackage(packageName)
 
-    suspend fun addReason(packageName: String?, label: String) =
-        db.reasons().insert(ReasonEntity(packageName = packageName, label = label))
+    /** Same accidental-duplicate risk as addRule() above, from the Add reason form. */
+    suspend fun addReason(packageName: String?, label: String): Long {
+        val exists = db.reasons().forPackage(packageName ?: "").any {
+            it.packageName == packageName && it.label.equals(label, ignoreCase = true)
+        }
+        if (exists) return -1
+        return db.reasons().insert(ReasonEntity(packageName = packageName, label = label))
+    }
 
     suspend fun deleteReason(reason: ReasonEntity) = db.reasons().delete(reason)
 
