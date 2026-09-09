@@ -34,8 +34,14 @@ class DoomscrollRepository private constructor(context: Context) {
      * ordinary suspending code.
      */
     suspend fun seedIfEmpty() {
-        if (db.contextRules().count() == 0) {
+        // A shipped rule set that can never be corrected on an existing install is worse than
+        // no rule set at all, so replace the built-ins whenever their version moves. Custom
+        // rules the user added are left alone.
+        val seededVersion = settingsStore.builtInRulesVersion()
+        if (db.contextRules().count() == 0 || seededVersion != BuiltInRules.VERSION) {
+            db.contextRules().deleteBuiltIns()
             db.contextRules().insertAll(BuiltInRules.all.map { it.toEntity(isBuiltIn = true) })
+            settingsStore.setBuiltInRulesVersion(BuiltInRules.VERSION)
         }
         if (db.monitoredApps().count() == 0) {
             BuiltInRules.defaultMonitoredPackages.forEach {

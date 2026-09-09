@@ -53,6 +53,12 @@ class SessionTracker(
         val state = states.getOrPut(packageName) { State() }
         if (!state.armed) return false
 
+        // The service may have started, or been restarted by the system, while this app was
+        // already in the foreground — in which case no window-state event ever arrived and
+        // the dwell clock was never started. Treat the first scroll we see as its start,
+        // otherwise the dwell check can never pass and the app silently never triggers.
+        if (state.foregroundedAt == 0L) state.foregroundedAt = now()
+
         state.scrollEvents++
         val dwelled = state.foregroundedAt > 0 && now() - state.foregroundedAt >= minDwellMs
         if (state.scrollEvents < minScrollEvents || !dwelled) return false

@@ -102,6 +102,19 @@ class SessionTrackerTest {
     }
 
     @Test
+    fun `triggers when the service starts with the app already in the foreground`() {
+        // No onAppForegrounded call at all: the service was enabled, or restarted by the
+        // system, while the user was already scrolling. Observed on device — the dwell clock
+        // was never started, so the app silently never fired.
+        val t = tracker()
+
+        assertFalse(t.onDoomscrollScroll(pkg))
+        now += 6_000
+        assertFalse(t.onDoomscrollScroll(pkg))
+        assertTrue("must still trigger without a window-state event", t.onDoomscrollScroll(pkg))
+    }
+
+    @Test
     fun `first ever launch is armed immediately`() {
         val t = tracker()
         t.onAppForegrounded(pkg)

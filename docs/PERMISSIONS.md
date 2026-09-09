@@ -61,6 +61,23 @@ adb shell settings put secure enabled_accessibility_services \
 adb shell settings put secure accessibility_enabled 1
 ```
 
+## After reinstalling
+
+Installing a new build silently **unbinds the accessibility service**, and writing the same
+value back to the setting does not rebind it — the system only reacts to a change. Delete it
+first:
+
+```bash
+adb shell settings delete secure enabled_accessibility_services
+adb shell settings put secure accessibility_enabled 0
+adb shell settings put secure enabled_accessibility_services \
+  com.valeri.doomscroll/com.valeri.doomscroll.service.DoomscrollAccessibilityService
+adb shell settings put secure accessibility_enabled 1
+```
+
+Confirm it came back with `adb logcat -d | grep "Doomscroll: connected"`. If you skip this,
+the app looks installed and enabled but receives no events at all.
+
 ## Watching it work
 
 ```bash

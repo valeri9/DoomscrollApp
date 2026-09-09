@@ -50,12 +50,18 @@ class OverlayController(private val service: AccessibilityService) {
 
     private fun showInternal(spec: InterventionSpec, onComplete: (InterventionResult) -> Unit) {
         val owner = OverlayLifecycleOwner().apply { onCreate() }
-        val view = BlockingFrameLayout(service)
 
-        val compose = ComposeView(service).apply {
+        // The owners must sit on the view that is added to the WindowManager, not on the
+        // ComposeView inside it: Compose resolves them by walking UP from the window's root,
+        // so setting them on the child alone throws "ViewTreeLifecycleOwner not found" the
+        // moment the view attaches.
+        val view = BlockingFrameLayout(service).apply {
             setViewTreeLifecycleOwner(owner)
             setViewTreeViewModelStoreOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
+        }
+
+        val compose = ComposeView(service).apply {
             setContent {
                 InterventionScreen(spec = spec) { result ->
                     onComplete(result)

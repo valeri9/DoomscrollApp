@@ -52,6 +52,9 @@ interface ContextRuleDao {
 
     @Query("SELECT COUNT(*) FROM context_rules")
     suspend fun count(): Int
+
+    @Query("DELETE FROM context_rules WHERE isBuiltIn = 1")
+    suspend fun deleteBuiltIns()
 }
 
 @Dao

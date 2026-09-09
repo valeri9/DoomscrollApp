@@ -3,11 +3,14 @@ package com.valeri.doomscroll.usage
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
+import android.content.Intent
 import android.util.Log
 import com.valeri.doomscroll.data.db.DailyAppUsageEntity
 import com.valeri.doomscroll.data.db.UsageSyncStateEntity
 import com.valeri.doomscroll.data.repo.DoomscrollRepository
 import com.valeri.doomscroll.service.Tag
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -15,12 +18,19 @@ import java.time.ZoneId
 /**
  * Reads whole-phone screen time from the OS.
  *
- * This is a completely separate data source from the accessibility service: it is polled on a
- * slow schedule and knows nothing about doomscrolling, it just answers "how long was each app
+ * A completely separate data source from the accessibility service: polled on a slow
+ * schedule, and it knows nothing about doomscrolling. It answers only "how long was each app
  * in the foreground each day". The dashboard puts the two side by side.
  *
- * How far back this can see is an OS limit, not ours. Android keeps daily buckets for roughly
- * one to four weeks and raw events for about a week, so expect a few weeks of history at most.
+ * Everything here reconstructs sessions from the raw event stream rather than reading the
+ * daily aggregate buckets. The buckets look tempting — they reach further back — but summing
+ * totalTimeInForeground across packages double-counts heavily: on a real device it reported
+ * 15.8 hours of screen time for a single day, because dozens of background and system
+ * packages each accrue their own overlapping foreground time. Event pairs give one
+ * non-overlapping session at a time, which is what "screen time" actually means.
+ *
+ * The cost is reach: the raw event log is retained for a week or two, so that is as far back
+ * as the history goes. Fewer days that are true beats a month that is wrong.
  */
 class UsageStatsImporter(private val context: Context) {
 
@@ -31,84 +41,51 @@ class UsageStatsImporter(private val context: Context) {
         get() = context.getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager
 
     /**
-     * One-time history import. Uses the daily aggregate buckets, which are coarse but reach
-     * further back than the raw event stream.
+     * Only packages with a launcher entry count as screen time.
+     *
+     * Without this, system chrome dominates the numbers: com.android.systemui accrued 5.5
+     * hours and incallui 2.7 hours over ten days on the test device. Neither is an app you
+     * decide to open — systemui is the shade and lock screen, and incallui keeps accruing
+     * through a call with the screen blanked by the proximity sensor. Filtering to launchable
+     * packages is the same rule the app picker uses.
      */
-    suspend fun backfill(days: Int = 60): Int {
-        val manager = usageStats ?: return 0
-        val today = LocalDate.now(zone)
-        val rows = mutableListOf<DailyAppUsageEntity>()
+    private val launchablePackages: Set<String> by lazy {
+        runCatching {
+            context.packageManager.queryIntentActivities(
+                Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
+            ).mapNotNull { it.activityInfo?.packageName }.toSet()
+        }.getOrDefault(emptySet())
+    }
 
-        for (offset in days downTo 1) {
-            val date = today.minusDays(offset.toLong())
-            val start = date.atStartOfDay(zone).toInstant().toEpochMilli()
-            val end = date.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+    /**
+     * One-time history import, reaching back as far as the event log survives.
+     * Anything older simply isn't recoverable from the OS.
+     */
+    suspend fun backfill(days: Int = 45): Int = importLock.withLock {
+        if (repo.usageDao.syncState()?.backfillCompletedAt != null) return@withLock 0
 
-            val stats = runCatching {
-                manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, end)
-            }.getOrNull().orEmpty()
+        val start = LocalDate.now(zone)
+            .minusDays((days - 1).toLong())
+            .atStartOfDay(zone).toInstant().toEpochMilli()
+        val written = importRange(start, System.currentTimeMillis())
 
-            stats.asSequence()
-                .filter { it.totalTimeInForeground > 0 }
-                // A bucket can overlap the window; keep only what actually belongs to this day.
-                .filter { it.lastTimeUsed in start until end || it.firstTimeStamp >= start }
-                .groupBy { it.packageName }
-                .forEach { (pkg, entries) ->
-                    rows += DailyAppUsageEntity(
-                        localDate = date.toString(),
-                        packageName = pkg,
-                        foregroundMs = entries.sumOf { it.totalTimeInForeground },
-                    )
-                }
-        }
-
-        if (rows.isNotEmpty()) repo.usageDao.upsertAll(rows)
         repo.usageDao.setSyncState(
             UsageSyncStateEntity(
                 backfillCompletedAt = System.currentTimeMillis(),
                 lastSyncedAt = System.currentTimeMillis(),
             )
         )
-        Log.i(Tag.SERVICE, "usage backfill wrote ${rows.size} rows over $days days")
-        return rows.size
+        Log.i(Tag.SERVICE, "usage backfill wrote $written rows (window $days days)")
+        written
     }
 
-    /**
-     * Rolling sync for recent days. Reconstructs foreground sessions from the raw event stream,
-     * which is accurate enough to trust for today's running total.
-     */
-    suspend fun syncRecent(days: Int = 3): Int {
-        val manager = usageStats ?: return 0
-        val today = LocalDate.now(zone)
-        val start = today.minusDays((days - 1).toLong()).atStartOfDay(zone).toInstant().toEpochMilli()
+    /** Rolling sync for recent days. Cheap, and re-derives today's running total. */
+    suspend fun syncRecent(days: Int = 3): Int = importLock.withLock {
+        val start = LocalDate.now(zone)
+            .minusDays((days - 1).toLong())
+            .atStartOfDay(zone).toInstant().toEpochMilli()
         val now = System.currentTimeMillis()
-
-        val events = runCatching { manager.queryEvents(start, now) }.getOrNull() ?: return 0
-
-        // packageName -> day -> accumulated ms
-        val totals = mutableMapOf<Pair<String, String>, Long>()
-        val resumedAt = mutableMapOf<String, Long>()
-        val event = UsageEvents.Event()
-
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event)
-            val pkg = event.packageName ?: continue
-            when (event.eventType) {
-                UsageEvents.Event.ACTIVITY_RESUMED -> resumedAt[pkg] = event.timeStamp
-                UsageEvents.Event.ACTIVITY_PAUSED,
-                UsageEvents.Event.ACTIVITY_STOPPED -> {
-                    val began = resumedAt.remove(pkg) ?: continue
-                    accumulate(totals, pkg, began, event.timeStamp)
-                }
-            }
-        }
-        // Whatever is still in the foreground counts up to now.
-        resumedAt.forEach { (pkg, began) -> accumulate(totals, pkg, began, now) }
-
-        val rows = totals.map { (key, ms) ->
-            DailyAppUsageEntity(localDate = key.second, packageName = key.first, foregroundMs = ms)
-        }
-        if (rows.isNotEmpty()) repo.usageDao.upsertAll(rows)
+        val written = importRange(start, now)
 
         val previous = repo.usageDao.syncState()
         repo.usageDao.setSyncState(
@@ -117,11 +94,65 @@ class UsageStatsImporter(private val context: Context) {
                 lastSyncedAt = now,
             )
         )
-        Log.d(Tag.SERVICE, "usage sync wrote ${rows.size} rows")
+        Log.d(Tag.SERVICE, "usage sync wrote $written rows")
+        written
+    }
+
+    /**
+     * Walks the event stream once and pairs each resume with the matching pause, producing
+     * per-app, per-day foreground totals.
+     */
+    private suspend fun importRange(startMillis: Long, endMillis: Long): Int {
+        val manager = usageStats ?: return 0
+        val events = runCatching { manager.queryEvents(startMillis, endMillis) }.getOrNull() ?: return 0
+
+        // (packageName, localDate) -> accumulated ms
+        val totals = mutableMapOf<Pair<String, String>, Long>()
+        val resumedAt = mutableMapOf<String, Long>()
+        val event = UsageEvents.Event()
+        var earliest = Long.MAX_VALUE
+
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event)
+            val pkg = event.packageName ?: continue
+            if (event.timeStamp < earliest) earliest = event.timeStamp
+
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> resumedAt[pkg] = event.timeStamp
+
+                UsageEvents.Event.ACTIVITY_PAUSED,
+                UsageEvents.Event.ACTIVITY_STOPPED -> {
+                    val began = resumedAt.remove(pkg) ?: continue
+                    accumulate(totals, pkg, began, event.timeStamp)
+                }
+
+                // The screen going off ends every session, whether or not a pause arrives.
+                UsageEvents.Event.SCREEN_NON_INTERACTIVE -> {
+                    resumedAt.forEach { (open, began) -> accumulate(totals, open, began, event.timeStamp) }
+                    resumedAt.clear()
+                }
+            }
+        }
+        // Whatever is still open runs up to the end of the window.
+        resumedAt.forEach { (pkg, began) -> accumulate(totals, pkg, began, endMillis) }
+
+        val launchable = launchablePackages
+        val rows = totals
+            .filterKeys { launchable.isEmpty() || it.first in launchable }
+            .filterValues { it > 0 }
+            .map { (key, ms) ->
+                DailyAppUsageEntity(localDate = key.second, packageName = key.first, foregroundMs = ms)
+            }
+        if (rows.isNotEmpty()) repo.usageDao.upsertAll(rows)
+
+        if (earliest != Long.MAX_VALUE) {
+            val oldest = Instant.ofEpochMilli(earliest).atZone(zone).toLocalDate()
+            Log.i(Tag.SERVICE, "event log reaches back to $oldest")
+        }
         return rows.size
     }
 
-    /** Splits a foreground session across midnight so daily totals stay honest. */
+    /** Splits a session across midnight so daily totals stay honest. */
     private fun accumulate(
         totals: MutableMap<Pair<String, String>, Long>,
         pkg: String,
@@ -129,6 +160,9 @@ class UsageStatsImporter(private val context: Context) {
         endedAt: Long,
     ) {
         if (endedAt <= beganAt) return
+        // A session longer than a day means we missed its pause event; don't trust it.
+        if (endedAt - beganAt > MAX_SESSION_MS) return
+
         var cursor = beganAt
         while (cursor < endedAt) {
             val date = Instant.ofEpochMilli(cursor).atZone(zone).toLocalDate()
@@ -141,4 +175,12 @@ class UsageStatsImporter(private val context: Context) {
     }
 
     suspend fun hasBackfilled(): Boolean = repo.usageDao.syncState()?.backfillCompletedAt != null
+
+    private companion object {
+        /** No single foreground session legitimately runs this long. */
+        const val MAX_SESSION_MS = 6 * 60 * 60 * 1000L
+
+        /** The worker and the dashboard can both trigger an import; only one should run. */
+        val importLock = Mutex()
+    }
 }

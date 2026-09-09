@@ -1,5 +1,6 @@
 package com.valeri.doomscroll.classifier
 
+import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.valeri.doomscroll.service.Tag
@@ -66,6 +67,8 @@ class RuleEngine(initialRules: List<ContextRule> = BuiltInRules.all) {
         root: AccessibilityNodeInfo,
         kind: RuleKind,
     ): Classification? {
+        val windowBounds = Rect().also { root.getBoundsInScreen(it) }
+
         for (rule in rules) {
             if (rule.kind != kind || rule.match != MatchType.VIEW_ID) continue
             val hits = try {
@@ -78,11 +81,30 @@ class RuleEngine(initialRules: List<ContextRule> = BuiltInRules.all) {
 
             // No recycle(): AccessibilityNodeInfo pooling was removed in API 33 and the call
             // is a deprecated no-op.
-            if (hits.any { it != null && it.isVisibleToUser }) {
+            if (hits.any { it != null && it.isOnScreen(windowBounds) }) {
                 return Classification(rule.kind.toScreenClass(), rule)
             }
         }
         return null
+    }
+
+    /**
+     * Whether a matched node is really on the screen we are looking at.
+     *
+     * isVisibleToUser is the obvious test and it is wrong here: Instagram collapses its feed
+     * action bar to one pixel tall as you scroll, which makes isVisibleToUser false while you
+     * are very much still on the feed — the main feed silently stopped being detected.
+     * Intersecting the window's own bounds keeps the collapsed bar and still rejects the
+     * retained neighbouring pages of a ViewPager, which sit a full screen width off to the side.
+     */
+    private fun AccessibilityNodeInfo.isOnScreen(windowBounds: Rect): Boolean {
+        val bounds = Rect().also { getBoundsInScreen(it) }
+        // An all-zero rect means the node was never measured, not that it is at the origin.
+        if (bounds.width() == 0 && bounds.height() == 0) return false
+        // Intersect on the horizontal axis only: a bar collapsed to zero height is still the
+        // bar for this screen, whereas an off-side ViewPager page never overlaps horizontally.
+        return bounds.right > windowBounds.left && bounds.left < windowBounds.right &&
+            bounds.bottom >= windowBounds.top && bounds.top <= windowBounds.bottom
     }
 
     private fun RuleKind.toScreenClass() = when (this) {
