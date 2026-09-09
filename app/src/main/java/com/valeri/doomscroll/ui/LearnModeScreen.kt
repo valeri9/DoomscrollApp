@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -27,6 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.valeri.doomscroll.classifier.MatchType
+import com.valeri.doomscroll.classifier.RuleKind
 import com.valeri.doomscroll.learn.CapturedNode
 import com.valeri.doomscroll.learn.LearnMode
 import com.valeri.doomscroll.ui.theme.Palette
@@ -39,9 +42,10 @@ private const val CAPTURE_WINDOW_MS = 15_000L
  * Instagram and TikTok can be replaced with ids that actually exist on this device.
  */
 @Composable
-fun LearnModeScreen(modifier: Modifier = Modifier, onBack: () -> Unit) {
+fun LearnModeScreen(vm: SettingsViewModel, modifier: Modifier = Modifier, onBack: () -> Unit) {
     val capture by LearnMode.lastCapture.collectAsStateWithLifecycle()
     var countdown by remember { mutableIntStateOf(0) }
+    var added by remember { mutableStateOf(emptySet<String>()) }
 
     LaunchedEffect(countdown) {
         if (countdown > 0) {
@@ -103,15 +107,32 @@ fun LearnModeScreen(modifier: Modifier = Modifier, onBack: () -> Unit) {
                 fontFamily = FontFamily.Monospace,
                 modifier = Modifier.padding(bottom = 10.dp),
             )
+            Text(
+                "Tap Doomscroll or Legit to turn an id into a rule for this app.",
+                color = Palette.TextMuted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(result.nodes) { node -> NodeRow(node) }
+                items(result.nodes) { node ->
+                    NodeRow(
+                        node = node,
+                        onAdd = { kind ->
+                            // Teaching it about an app implies watching that app.
+                            vm.addApp(result.packageName)
+                            vm.addRule(result.packageName, kind, MatchType.VIEW_ID, node.shortId)
+                            added = added + node.shortId
+                        },
+                        alreadyAdded = node.shortId in added,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun NodeRow(node: CapturedNode) {
+private fun NodeRow(node: CapturedNode, onAdd: (RuleKind) -> Unit, alreadyAdded: Boolean) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = Palette.Surface),
@@ -134,6 +155,23 @@ private fun NodeRow(node: CapturedNode) {
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 3.dp),
             )
+            if (alreadyAdded) {
+                Text(
+                    "Added",
+                    color = Palette.Mist,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { onAdd(RuleKind.DOOMSCROLL) }) {
+                        Text("Doomscroll", color = Palette.Ember, fontSize = 13.sp)
+                    }
+                    TextButton(onClick = { onAdd(RuleKind.LEGIT) }) {
+                        Text("Legit", color = Palette.Mist, fontSize = 13.sp)
+                    }
+                }
+            }
         }
     }
 }

@@ -12,10 +12,18 @@ import com.valeri.doomscroll.service.Tag
  * outright. If a screen looks like both a feed and a DM thread, we treat it as a DM and
  * stay silent.
  */
-class RuleEngine(rulesProvider: () -> List<ContextRule> = { BuiltInRules.all }) {
+class RuleEngine(initialRules: List<ContextRule> = BuiltInRules.all) {
 
-    private val rulesByPackage: Map<String, List<ContextRule>> =
-        rulesProvider().filter { it.enabled }.groupBy { it.packageName }
+    @Volatile
+    private var rulesByPackage: Map<String, List<ContextRule>> = index(initialRules)
+
+    /** Swapped in whenever the rule set is edited; classification reads a single reference. */
+    fun updateRules(rules: List<ContextRule>) {
+        rulesByPackage = index(rules)
+    }
+
+    private fun index(rules: List<ContextRule>) =
+        rules.filter { it.enabled }.groupBy { it.packageName }
 
     fun classify(
         packageName: String,

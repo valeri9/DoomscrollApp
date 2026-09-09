@@ -10,9 +10,9 @@ package com.valeri.doomscroll.service
  * the overlay and straight back in does not earn you a fresh pass.
  */
 class SessionTracker(
-    private val cooldownMs: Long = DetectionConfig.COOLDOWN_MS,
-    private val minScrollEvents: Int = DetectionConfig.MIN_SCROLL_EVENTS,
-    private val minDwellMs: Long = DetectionConfig.MIN_DWELL_MS,
+    @Volatile var cooldownMs: Long = DetectionConfig.COOLDOWN_MS,
+    @Volatile var minScrollEvents: Int = DetectionConfig.MIN_SCROLL_EVENTS,
+    @Volatile var minDwellMs: Long = DetectionConfig.MIN_DWELL_MS,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
 

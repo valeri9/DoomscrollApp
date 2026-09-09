@@ -33,18 +33,22 @@ class OverlayController(private val service: AccessibilityService) {
         hide()
     }
 
-    val isShowing: Boolean get() = container != null
+    @Volatile
+    var isShowing: Boolean = false
+        private set
 
-    fun show(packageName: String, contextLabel: String, breathingSeconds: Int) {
+    fun show(spec: InterventionSpec, onComplete: (InterventionResult) -> Unit) {
         if (isShowing) return
         if (!Settings.canDrawOverlays(service)) {
             Log.w(Tag.OVERLAY, "SYSTEM_ALERT_WINDOW not granted; cannot show intervention")
             return
         }
-        mainHandler.post { showInternal(packageName, contextLabel, breathingSeconds) }
+        // Claimed synchronously so a burst of scroll events can't open two windows.
+        isShowing = true
+        mainHandler.post { showInternal(spec, onComplete) }
     }
 
-    private fun showInternal(packageName: String, contextLabel: String, breathingSeconds: Int) {
+    private fun showInternal(spec: InterventionSpec, onComplete: (InterventionResult) -> Unit) {
         val owner = OverlayLifecycleOwner().apply { onCreate() }
         val view = BlockingFrameLayout(service)
 
@@ -53,12 +57,10 @@ class OverlayController(private val service: AccessibilityService) {
             setViewTreeViewModelStoreOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
             setContent {
-                InterventionScreen(
-                    packageName = packageName,
-                    contextLabel = contextLabel,
-                    breathingSeconds = breathingSeconds,
-                    onDismiss = { reason -> onCompleted(packageName, contextLabel, reason) },
-                )
+                InterventionScreen(spec = spec) { result ->
+                    onComplete(result)
+                    hide()
+                }
             }
         }
         view.addView(compose)
@@ -68,13 +70,19 @@ class OverlayController(private val service: AccessibilityService) {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             // Focusable on purpose: it makes the window modal, lets us intercept BACK, and is
-            // a prerequisite for the typed-reason field in the night-mode flow.
+            // a prerequisite for the IME reaching the typed-reason field at night. A
+            // FLAG_NOT_FOCUSABLE window silently refuses keyboard input.
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
+            // Deprecated in favour of the insets API, which assumes an Activity window with
+            // decor. This window has neither, and ADJUST_RESIZE is what actually gets the
+            // keyboard to move the typed-reason field into view. Verify on device.
+            @Suppress("DEPRECATION")
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
 
         try {
@@ -82,6 +90,7 @@ class OverlayController(private val service: AccessibilityService) {
         } catch (e: Exception) {
             Log.e(Tag.OVERLAY, "addView failed", e)
             owner.onDestroy()
+            isShowing = false
             return
         }
 
@@ -89,24 +98,21 @@ class OverlayController(private val service: AccessibilityService) {
         lifecycleOwner = owner
         owner.onResume()
         mainHandler.postDelayed(safetyDismiss, SAFETY_TIMEOUT_MS)
-        Log.i(Tag.OVERLAY, "shown for $packageName ($contextLabel)")
-    }
-
-    private fun onCompleted(packageName: String, contextLabel: String, reason: String?) {
-        // Phase 2 persists this to Room; for now it goes to logcat so the checkpoint is verifiable.
-        Log.i(Tag.OVERLAY, "completed pkg=$packageName context=$contextLabel reason=${reason ?: "-"}")
-        hide()
+        Log.i(Tag.OVERLAY, "shown for ${spec.packageName} (${spec.contextLabel}, night=${spec.isNight})")
     }
 
     fun hide() {
         mainHandler.removeCallbacks(safetyDismiss)
         mainHandler.post {
-            val view = container ?: return@post
-            runCatching { windowManager.removeViewImmediate(view) }
-                .onFailure { Log.w(Tag.OVERLAY, "removeView failed: ${it.message}") }
+            val view = container
+            if (view != null) {
+                runCatching { windowManager.removeViewImmediate(view) }
+                    .onFailure { Log.w(Tag.OVERLAY, "removeView failed: ${it.message}") }
+            }
             lifecycleOwner?.onDestroy()
             container = null
             lifecycleOwner = null
+            isShowing = false
         }
     }
 

@@ -45,3 +45,23 @@ fun DoomscrollTheme(
         content = content,
     )
 }
+
+/**
+ * Chart marks are a separate palette from the UI accents.
+ *
+ * The UI accents (Mist, Ember) sit around OKLCH L 0.79 with chroma under 0.10 — fine as
+ * chrome on a dark ground, but as data marks they fall outside the dark-mode lightness band
+ * and read as washed-out gray. These two are the validated substitutes: L within 0.48–0.67,
+ * chroma above 0.10, worst-case CVD separation ΔE 12.5 (protan) against each other and
+ * >= 3:1 contrast against the Ink surface.
+ */
+object ChartPalette {
+    /** Series 1 — screen time. Also the single-series colour for the daily trend. */
+    val Teal = Color(0xFF12A88C)
+    /** Series 2 — night-time share. */
+    val Amber = Color(0xFFD97828)
+    /** Recessive grid and axis lines. */
+    val Grid = Color(0xFF232B3B)
+    /** Bars for days with no data, and the unfilled remainder of a track. */
+    val Track = Color(0xFF1A2231)
+}
