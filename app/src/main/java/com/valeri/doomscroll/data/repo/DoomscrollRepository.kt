@@ -11,6 +11,8 @@ import com.valeri.doomscroll.data.db.MonitoredAppEntity
 import com.valeri.doomscroll.data.db.ReasonEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -29,11 +31,21 @@ class DoomscrollRepository private constructor(context: Context) {
         monitoredApps.map { apps -> apps.filter { it.enabled }.map { it.packageName }.toSet() }
 
     /**
+     * Guards seedIfEmpty(). It is called independently from both the accessibility service
+     * (on connect) and the settings screen (on open), which can run at the same moment on a
+     * fresh install. Without this, both callers can pass the "is anything seeded yet" check
+     * before either has inserted anything, and each then runs its own delete-then-insert —
+     * producing two copies of every built-in rule and default reason. The check and the write
+     * must be one atomic step, not two.
+     */
+    private val seedMutex = Mutex()
+
+    /**
      * Seeds the shipped rules, apps and reasons the first time the database is opened.
      * Done lazily rather than in a Room callback so it can be re-checked cheaply and stays
      * ordinary suspending code.
      */
-    suspend fun seedIfEmpty() {
+    suspend fun seedIfEmpty() = seedMutex.withLock {
         // A shipped rule set that can never be corrected on an existing install is worse than
         // no rule set at all, so replace the built-ins whenever their version moves. Custom
         // rules the user added are left alone.
@@ -63,7 +75,24 @@ class DoomscrollRepository private constructor(context: Context) {
     fun rulesForPackage(packageName: String): Flow<List<ContextRuleEntity>> =
         db.contextRules().observeForPackage(packageName)
 
-    suspend fun addRule(rule: ContextRuleEntity): Long = db.contextRules().insert(rule)
+    /**
+     * Inserting the exact same rule twice is a real path, not just a theoretical one: Learn
+     * Mode's "promote to rule" and the manual Add rule form both call this directly, and
+     * re-running Learn Mode on a screen already taught (or double-tapping the button) is an
+     * easy accident. There's no unique constraint on the table, so nothing else stops it -
+     * silently no-op on an exact duplicate rather than growing a second identical row every
+     * time.
+     */
+    suspend fun addRule(rule: ContextRuleEntity): Long {
+        val exists = db.contextRules().getAll().any {
+            it.packageName == rule.packageName &&
+                it.kind == rule.kind &&
+                it.matchType == rule.matchType &&
+                it.pattern == rule.pattern
+        }
+        if (exists) return -1
+        return db.contextRules().insert(rule)
+    }
     suspend fun updateRule(rule: ContextRuleEntity) = db.contextRules().update(rule)
     suspend fun deleteRule(rule: ContextRuleEntity) = db.contextRules().delete(rule)
 
@@ -72,8 +101,20 @@ class DoomscrollRepository private constructor(context: Context) {
     suspend fun addMonitoredApp(packageName: String) =
         db.monitoredApps().upsert(MonitoredAppEntity(packageName = packageName))
 
-    suspend fun setAppEnabled(packageName: String, enabled: Boolean) =
-        db.monitoredApps().upsert(MonitoredAppEntity(packageName = packageName, enabled = enabled))
+    // Upsert replaces the whole row on the packageName conflict, including addedAt's
+    // System.currentTimeMillis() default — building a fresh entity here silently reset
+    // addedAt (and therefore the app's position in observeAll()'s ORDER BY addedAt) every
+    // time a switch was toggled. Preserve the original addedAt when the row already exists.
+    suspend fun setAppEnabled(packageName: String, enabled: Boolean) {
+        val existing = db.monitoredApps().getAll().firstOrNull { it.packageName == packageName }
+        db.monitoredApps().upsert(
+            MonitoredAppEntity(
+                packageName = packageName,
+                enabled = enabled,
+                addedAt = existing?.addedAt ?: System.currentTimeMillis(),
+            )
+        )
+    }
 
     suspend fun removeMonitoredApp(packageName: String) = db.monitoredApps().remove(packageName)
 
@@ -88,10 +129,28 @@ class DoomscrollRepository private constructor(context: Context) {
     fun observeReasonsFor(packageName: String): Flow<List<ReasonEntity>> =
         db.reasons().observeForPackage(packageName)
 
-    suspend fun addReason(packageName: String?, label: String) =
-        db.reasons().insert(ReasonEntity(packageName = packageName, label = label))
+    /** Same accidental-duplicate risk as addRule() above, from the Add reason form. */
+    suspend fun addReason(packageName: String?, label: String): Long {
+        val exists = db.reasons().forPackage(packageName ?: "").any {
+            it.packageName == packageName && it.label.equals(label, ignoreCase = true)
+        }
+        if (exists) return -1
+        return db.reasons().insert(ReasonEntity(packageName = packageName, label = label))
+    }
 
-    suspend fun deleteReason(reason: ReasonEntity) = db.reasons().delete(reason)
+    /**
+     * Refuses to delete the last reason visible to a package. An empty reason list isn't
+     * just confusing in Settings — InterventionScreen's tap-to-pick step is now written to
+     * tolerate it (an empty list auto-satisfies the submit gate rather than trapping the
+     * user), but there is no reason to let the app reach a state where the "why are you
+     * here" prompt has nothing to offer in the first place.
+     */
+    suspend fun deleteReason(reason: ReasonEntity): Boolean {
+        val remaining = db.reasons().forPackage(reason.packageName ?: "").size
+        if (remaining <= 1) return false
+        db.reasons().delete(reason)
+        return true
+    }
 
     // --- interventions -----------------------------------------------------------------
 

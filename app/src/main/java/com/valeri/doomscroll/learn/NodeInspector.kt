@@ -59,6 +59,11 @@ object NodeInspector {
                 null
             } ?: continue
             walk(child, depth + 1, out)
+            // recycle() is a no-op on API 33+ but the pool is real on minSdk 26-32, and a
+            // capture that retries on every event while a slow screen settles can otherwise
+            // run several full 600-node traversals in a row without releasing any of them.
+            @Suppress("DEPRECATION")
+            child.recycle()
         }
     }
 }

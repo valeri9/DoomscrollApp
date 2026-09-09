@@ -35,8 +35,15 @@ class DoomscrollAccessibilityService : AccessibilityService() {
 
     @Volatile private var settings: Settings = Settings()
 
-    /** Cached classification, keyed by the package it was computed for. */
+    /**
+     * Cached classification, keyed by the package AND window class it was computed for.
+     * Package alone is not enough: a same-package navigation (e.g. feed -> DM thread) that
+     * fires only TYPE_WINDOW_CONTENT_CHANGED, not TYPE_WINDOW_STATE_CHANGED, never calls
+     * invalidateCache(). Without the class-name key, a scroll on the new (legit) screen
+     * within the throttle window would hit the stale feed classification and trigger.
+     */
     private var cachedPackage: String? = null
+    private var cachedClassName: String? = null
     private var cachedResult: RuleEngine.Classification? = null
     private var cachedAt: Long = 0L
 
@@ -46,11 +53,16 @@ class DoomscrollAccessibilityService : AccessibilityService() {
         repo = DoomscrollRepository.get(this)
 
         scope.launch {
+            // seedIfEmpty() must complete before allRules is ever subscribed to. Starting
+            // both concurrently raced Room's Flow against the seed insert: if the Flow's
+            // first query ran before the seed committed, it emitted an empty list, and if
+            // that empty emission's updateRules() landed after this coroutine's own
+            // post-seed updateRules() call, every rule was silently wiped until the next
+            // unrelated table write. Awaiting the seed first, then subscribing, means the
+            // Flow's very first emission already reflects the seeded rows — no explicit
+            // updateRules() call is needed here at all, so the two writers collapse into one.
             repo.seedIfEmpty()
-            ruleEngine.updateRules(repo.activeRules())
             applyMonitoredPackages(repo.monitoredPackagesNow())
-        }
-        scope.launch {
             repo.allRules.collectLatest { rules ->
                 ruleEngine.updateRules(rules.filter { it.enabled }.map { it.toDomain() })
             }
@@ -78,7 +90,17 @@ class DoomscrollAccessibilityService : AccessibilityService() {
         if (packages.isEmpty()) {
             Log.w(Tag.SERVICE, "no monitored apps; service is idle")
         }
-        serviceInfo = serviceInfo?.apply { packageNames = packages.toTypedArray() }
+        // serviceInfo is nullable before the framework has finished connecting. Leaving
+        // packageNames unset means "every app" per the AccessibilityServiceInfo contract —
+        // the exact opposite of the narrowing this exists for — so a silent no-op here would
+        // quietly defeat the main battery optimization. Never claim success without checking.
+        val info = serviceInfo
+        if (info == null) {
+            Log.w(Tag.SERVICE, "serviceInfo unavailable; could not narrow to $packages")
+            return
+        }
+        info.packageNames = packages.toTypedArray()
+        serviceInfo = info
         Log.i(Tag.SERVICE, "monitoring $packages")
     }
 
@@ -162,9 +184,12 @@ class DoomscrollAccessibilityService : AccessibilityService() {
 
     private fun classify(packageName: String, className: CharSequence?): RuleEngine.Classification {
         val now = System.currentTimeMillis()
+        val classNameStr = className?.toString()
         val cached = cachedResult
         val fresh = now - cachedAt < DetectionConfig.CLASSIFY_THROTTLE_MS
-        if (cached != null && cachedPackage == packageName && fresh) return cached
+        if (cached != null && cachedPackage == packageName && cachedClassName == classNameStr && fresh) {
+            return cached
+        }
 
         val root: AccessibilityNodeInfo? = try {
             rootInActiveWindow
@@ -174,7 +199,12 @@ class DoomscrollAccessibilityService : AccessibilityService() {
         }
 
         val result = ruleEngine.classify(packageName, className, root)
+        // Nodes obtained via rootInActiveWindow are still pool-managed on API <33
+        // (minSdk 26); release it now that classification is done with it.
+        @Suppress("DEPRECATION")
+        root?.recycle()
         cachedPackage = packageName
+        cachedClassName = classNameStr
         cachedResult = result
         cachedAt = now
 
@@ -184,13 +214,19 @@ class DoomscrollAccessibilityService : AccessibilityService() {
 
     private fun invalidateCache() {
         cachedResult = null
+        cachedClassName = null
         cachedAt = 0L
     }
 
     /** Learn Mode: dump the hierarchy, but only while the UI has explicitly armed a capture. */
     private fun maybeCapture(packageName: String, event: AccessibilityEvent) {
         if (!LearnMode.isArmed) return
-        val nodes = NodeInspector.capture(rootInActiveWindow)
+        // A separate rootInActiveWindow call from classify()'s, so it needs its own release —
+        // same reasoning as there: the per-process node pool is real on minSdk 26-32.
+        val root = rootInActiveWindow
+        val nodes = NodeInspector.capture(root)
+        @Suppress("DEPRECATION")
+        root?.recycle()
         if (nodes.isEmpty()) return
         LearnMode.record(
             LearnMode.Capture(
@@ -206,10 +242,25 @@ class DoomscrollAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
+        cleanup("unbound")
+        return super.onUnbind(intent)
+    }
+
+    // Teardown was previously reachable only through onUnbind(). If the framework or an
+    // OEM's background killer tears the process down via onDestroy() without a preceding
+    // onUnbind() — some ROMs do this under battery restrictions for accessibility services —
+    // scope.cancel() never ran and a currently-shown overlay was never explicitly hidden.
+    // Cancelling an already-cancelled Job (and hiding an already-hidden overlay) is a no-op,
+    // so it's safe for both paths to call the same cleanup.
+    override fun onDestroy() {
+        cleanup("destroyed")
+        super.onDestroy()
+    }
+
+    private fun cleanup(reason: String) {
         if (::overlay.isInitialized) overlay.hide()
         sessions.reset()
         scope.cancel()
-        Log.i(Tag.SERVICE, "unbound")
-        return super.onUnbind(intent)
+        Log.i(Tag.SERVICE, reason)
     }
 }

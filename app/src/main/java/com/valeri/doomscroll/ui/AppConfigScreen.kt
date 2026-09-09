@@ -113,17 +113,29 @@ fun AppConfigScreen(
         SectionHeader("Reasons offered")
         SettingsCard {
             reasons.forEach { reason ->
+                // The last reason can't be removed — an empty list would leave the "why are
+                // you here" prompt with nothing to offer.
+                val isLastOne = reasons.size <= 1
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(reason.label, color = Palette.TextPrimary, fontSize = 14.sp)
-                        if (reason.packageName == null) {
-                            Text("Shown for every app", color = Palette.TextMuted, fontSize = 11.sp)
+                        val subtitle = when {
+                            isLastOne -> "Last reason — can't be removed"
+                            reason.packageName == null -> "Shown for every app"
+                            else -> null
+                        }
+                        if (subtitle != null) {
+                            Text(subtitle, color = Palette.TextMuted, fontSize = 11.sp)
                         }
                     }
-                    IconButton(onClick = { vm.deleteReason(reason) }, modifier = Modifier.size(34.dp)) {
+                    IconButton(
+                        onClick = { vm.deleteReason(reason) },
+                        enabled = !isLastOne,
+                        modifier = Modifier.size(34.dp),
+                    ) {
                         Icon(Icons.Default.Close, "Delete reason", tint = Palette.TextMuted)
                     }
                 }

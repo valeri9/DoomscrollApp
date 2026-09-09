@@ -33,19 +33,44 @@ class OverlayController(private val service: AccessibilityService) {
         hide()
     }
 
-    @Volatile
     var isShowing: Boolean = false
         private set
 
+    /**
+     * The check-and-set for isShowing lives entirely inside this posted block, not before
+     * it. intervene() runs on Dispatchers.Default, a real thread pool, and different
+     * monitored apps keep independent session state — so two triggers close together
+     * (e.g. a backgrounded app's lingering events overlapping a foreground trigger) could
+     * call show() from two different threads at nearly the same moment. A check-then-set
+     * split across "read isShowing here, write it after a post" is not atomic across
+     * threads: both calls could see isShowing == false before either's write becomes
+     * visible, both would post to the main thread, and the second showInternal() would
+     * silently overwrite container/lifecycleOwner — leaking the first overlay's
+     * WindowManager view with nothing left pointing at it to remove it. That leaked window
+     * is still focusable and still swallows BACK, so the failure mode is not a cosmetic
+     * glitch — it is the phone's back button quietly stopping working until the service
+     * happens to rebind.
+     *
+     * Posting the check itself, rather than just the work that follows it, means every
+     * call is serialized through the single main-thread queue: whichever call's Runnable
+     * runs first sees the true state and wins, and everything after it correctly sees
+     * isShowing == true and backs off. No @Volatile or lock can fix a race that spans two
+     * separate statements on two different threads; moving both statements onto one
+     * thread removes the race instead of narrowing it.
+     */
     fun show(spec: InterventionSpec, onComplete: (InterventionResult) -> Unit) {
-        if (isShowing) return
         if (!Settings.canDrawOverlays(service)) {
             Log.w(Tag.OVERLAY, "SYSTEM_ALERT_WINDOW not granted; cannot show intervention")
             return
         }
-        // Claimed synchronously so a burst of scroll events can't open two windows.
-        isShowing = true
-        mainHandler.post { showInternal(spec, onComplete) }
+        mainHandler.post {
+            if (isShowing) {
+                Log.w(Tag.OVERLAY, "already showing; dropping trigger for ${spec.packageName}")
+                return@post
+            }
+            isShowing = true
+            showInternal(spec, onComplete)
+        }
     }
 
     private fun showInternal(spec: InterventionSpec, onComplete: (InterventionResult) -> Unit) {

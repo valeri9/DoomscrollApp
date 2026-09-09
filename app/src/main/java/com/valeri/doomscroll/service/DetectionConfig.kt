@@ -21,11 +21,8 @@ object DetectionConfig {
      * Re-arm during a single long sitting. Without this you get one intervention no matter how
      * long you keep scrolling, which is too lenient to be much use.
      */
-    const val RE_ARM_AFTER_MS = 10 * 60 * 1000L
+    const val RE_ARM_AFTER_MS = 4 * 60 * 1000L
 
     /** Re-classification is at most this often; results are cached in between. */
     const val CLASSIFY_THROTTLE_MS = 750L
-
-    /** Length of the normal-hours breathing exercise. */
-    const val BREATHING_SECONDS = 10
 }

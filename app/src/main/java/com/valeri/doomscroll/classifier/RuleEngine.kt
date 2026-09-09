@@ -79,9 +79,13 @@ class RuleEngine(initialRules: List<ContextRule> = BuiltInRules.all) {
                 null
             } ?: continue
 
-            // No recycle(): AccessibilityNodeInfo pooling was removed in API 33 and the call
-            // is a deprecated no-op.
-            if (hits.any { it != null && it.isOnScreen(windowBounds) }) {
+            // recycle() is a deprecated no-op only on API 33+; minSdk here is 26, where the
+            // per-process node pool is real and this runs on every relevant event for every
+            // enabled rule. Release every returned node once we're done reading it.
+            val matched = hits.any { it != null && it.isOnScreen(windowBounds) }
+            @Suppress("DEPRECATION")
+            hits.forEach { it?.recycle() }
+            if (matched) {
                 return Classification(rule.kind.toScreenClass(), rule)
             }
         }

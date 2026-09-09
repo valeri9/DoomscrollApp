@@ -165,7 +165,14 @@ private fun ReasonPane(spec: InterventionSpec, onComplete: (InterventionResult) 
     }
 
     val typedLongEnough = typed.trim().length >= spec.minReasonChars
-    val canSubmit = if (spec.requireTypedReason) typedLongEnough else pickedLabel != null
+    // If there is nothing to pick — every reason for this app was deleted in Settings, or
+    // some future path leaves the list empty — the overlay must never become unclosable.
+    // BACK is deliberately swallowed here, so an unmet gate with nothing to satisfy it would
+    // trap the user until the 5-minute safety timeout. Treat "nothing to choose from" as
+    // already satisfied rather than as blocked.
+    val canSubmit = if (spec.requireTypedReason) typedLongEnough else {
+        pickedLabel != null || spec.reasons.isEmpty()
+    }
     val canContinue = submitted && continueDelay == 0
 
     Column(
