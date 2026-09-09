@@ -30,7 +30,7 @@ data class Settings(
     val minScrollEvents: Int = 3,
     val minDwellSeconds: Int = 5,
     /** Re-arm during one long sitting. 0 means one intervention per visit. */
-    val reArmAfterMinutes: Int = 10,
+    val reArmAfterMinutes: Int = 4,
     val enabled: Boolean = true,
 ) {
     val cooldownMs: Long get() = cooldownMinutes * 60_000L
