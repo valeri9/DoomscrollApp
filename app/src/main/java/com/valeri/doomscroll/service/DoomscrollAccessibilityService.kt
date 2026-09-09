@@ -64,6 +64,7 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                 sessions.cooldownMs = updated.cooldownMs
                 sessions.minScrollEvents = updated.minScrollEvents
                 sessions.minDwellMs = updated.minDwellMs
+                sessions.reArmAfterMs = updated.reArmAfterMs
             }
         }
         Log.i(Tag.SERVICE, "connected")
@@ -86,9 +87,11 @@ class DoomscrollAccessibilityService : AccessibilityService() {
         if (!settings.enabled) return
         val packageName = event.packageName?.toString() ?: return
 
+        // Every event counts as "still here". Re-arming is driven by the absence of these.
+        sessions.noteActivity(packageName)
+
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                sessions.onAppForegrounded(packageName)
                 invalidateCache()
                 maybeCapture(packageName, event)
                 // Warm the cache so the first scroll doesn't pay for classification.

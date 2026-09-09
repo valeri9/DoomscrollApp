@@ -79,5 +79,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setCooldown(minutes: Int) = viewModelScope.launch { repo.settingsStore.setCooldownMinutes(minutes) }
     fun setMinScrolls(count: Int) = viewModelScope.launch { repo.settingsStore.setMinScrollEvents(count) }
     fun setMinDwell(seconds: Int) = viewModelScope.launch { repo.settingsStore.setMinDwellSeconds(seconds) }
+    fun setReArmAfter(minutes: Int) = viewModelScope.launch { repo.settingsStore.setReArmAfterMinutes(minutes) }
     fun setEnabled(enabled: Boolean) = viewModelScope.launch { repo.settingsStore.setEnabled(enabled) }
 }
