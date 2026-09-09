@@ -186,6 +186,18 @@ fun SettingsScreen(
                 range = 0..120,
                 onChange = vm::setMinDwell,
             )
+            StepperRow(
+                title = "Nudge again after",
+                subtitle = if (settings.reArmAfterMinutes == 0) {
+                    "Off — one interruption however long you keep scrolling"
+                } else {
+                    "If you're still scrolling this long after the last one"
+                },
+                value = settings.reArmAfterMinutes,
+                unit = "m",
+                range = 0..120,
+                onChange = vm::setReArmAfter,
+            )
         }
     }
 }

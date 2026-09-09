@@ -17,6 +17,12 @@ object DetectionConfig {
     /** Time in the app before a trigger is possible, for the same reason. */
     const val MIN_DWELL_MS = 5_000L
 
+    /**
+     * Re-arm during a single long sitting. Without this you get one intervention no matter how
+     * long you keep scrolling, which is too lenient to be much use.
+     */
+    const val RE_ARM_AFTER_MS = 10 * 60 * 1000L
+
     /** Re-classification is at most this often; results are cached in between. */
     const val CLASSIFY_THROTTLE_MS = 750L
 

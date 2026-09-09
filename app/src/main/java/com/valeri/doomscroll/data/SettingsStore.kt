@@ -29,10 +29,13 @@ data class Settings(
     val cooldownMinutes: Int = 3,
     val minScrollEvents: Int = 3,
     val minDwellSeconds: Int = 5,
+    /** Re-arm during one long sitting. 0 means one intervention per visit. */
+    val reArmAfterMinutes: Int = 10,
     val enabled: Boolean = true,
 ) {
     val cooldownMs: Long get() = cooldownMinutes * 60_000L
     val minDwellMs: Long get() = minDwellSeconds * 1000L
+    val reArmAfterMs: Long get() = reArmAfterMinutes * 60_000L
 
     /**
      * Night windows normally wrap past midnight (00:00-08:00 does not, but 22:00-06:00 does),
@@ -72,6 +75,7 @@ class SettingsStore(private val context: Context) {
         val cooldown = intPreferencesKey("cooldown_minutes")
         val minScrolls = intPreferencesKey("min_scroll_events")
         val minDwell = intPreferencesKey("min_dwell_seconds")
+        val reArmAfter = intPreferencesKey("re_arm_after_minutes")
         val enabled = booleanPreferencesKey("enabled")
         val builtInRulesVersion = intPreferencesKey("built_in_rules_version")
     }
@@ -89,6 +93,7 @@ class SettingsStore(private val context: Context) {
             cooldownMinutes = prefs[Keys.cooldown] ?: defaults.cooldownMinutes,
             minScrollEvents = prefs[Keys.minScrolls] ?: defaults.minScrollEvents,
             minDwellSeconds = prefs[Keys.minDwell] ?: defaults.minDwellSeconds,
+            reArmAfterMinutes = prefs[Keys.reArmAfter] ?: defaults.reArmAfterMinutes,
             enabled = prefs[Keys.enabled] ?: defaults.enabled,
         )
     }
@@ -106,6 +111,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setCooldownMinutes(minutes: Int) = edit { it[Keys.cooldown] = minutes }
     suspend fun setMinScrollEvents(count: Int) = edit { it[Keys.minScrolls] = count }
     suspend fun setMinDwellSeconds(seconds: Int) = edit { it[Keys.minDwell] = seconds }
+    suspend fun setReArmAfterMinutes(minutes: Int) = edit { it[Keys.reArmAfter] = minutes }
     suspend fun setEnabled(enabled: Boolean) = edit { it[Keys.enabled] = enabled }
 
     suspend fun builtInRulesVersion(): Int =
