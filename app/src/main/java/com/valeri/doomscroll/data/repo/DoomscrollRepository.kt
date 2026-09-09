@@ -126,7 +126,19 @@ class DoomscrollRepository private constructor(context: Context) {
         return db.reasons().insert(ReasonEntity(packageName = packageName, label = label))
     }
 
-    suspend fun deleteReason(reason: ReasonEntity) = db.reasons().delete(reason)
+    /**
+     * Refuses to delete the last reason visible to a package. An empty reason list isn't
+     * just confusing in Settings — InterventionScreen's tap-to-pick step is now written to
+     * tolerate it (an empty list auto-satisfies the submit gate rather than trapping the
+     * user), but there is no reason to let the app reach a state where the "why are you
+     * here" prompt has nothing to offer in the first place.
+     */
+    suspend fun deleteReason(reason: ReasonEntity): Boolean {
+        val remaining = db.reasons().forPackage(reason.packageName ?: "").size
+        if (remaining <= 1) return false
+        db.reasons().delete(reason)
+        return true
+    }
 
     // --- interventions -----------------------------------------------------------------
 
