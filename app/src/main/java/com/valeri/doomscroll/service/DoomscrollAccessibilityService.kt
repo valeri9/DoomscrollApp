@@ -78,7 +78,17 @@ class DoomscrollAccessibilityService : AccessibilityService() {
         if (packages.isEmpty()) {
             Log.w(Tag.SERVICE, "no monitored apps; service is idle")
         }
-        serviceInfo = serviceInfo?.apply { packageNames = packages.toTypedArray() }
+        // serviceInfo is nullable before the framework has finished connecting. Leaving
+        // packageNames unset means "every app" per the AccessibilityServiceInfo contract —
+        // the exact opposite of the narrowing this exists for — so a silent no-op here would
+        // quietly defeat the main battery optimization. Never claim success without checking.
+        val info = serviceInfo
+        if (info == null) {
+            Log.w(Tag.SERVICE, "serviceInfo unavailable; could not narrow to $packages")
+            return
+        }
+        info.packageNames = packages.toTypedArray()
+        serviceInfo = info
         Log.i(Tag.SERVICE, "monitoring $packages")
     }
 

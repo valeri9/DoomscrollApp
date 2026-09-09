@@ -16,6 +16,15 @@ class EnumConverters {
     @TypeConverter fun stringToMatchType(value: String): MatchType = MatchType.valueOf(value)
 }
 
+/**
+ * version bumps need a real Migration, not fallbackToDestructiveMigration().
+ *
+ * This is the only copy of this device's doomscroll log and usage history — there is no
+ * server to re-sync from. Room's destructive fallback silently drops every table on a schema
+ * mismatch, which trades a loud, obvious crash for a quiet, permanent data loss the user would
+ * not notice until they went looking for last month's stats. A crash is recoverable (write the
+ * migration, ship a fix); a silent wipe on a personal-data app is not.
+ */
 @Database(
     entities = [
         MonitoredAppEntity::class,

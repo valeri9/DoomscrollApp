@@ -11,6 +11,8 @@ import com.valeri.doomscroll.data.db.MonitoredAppEntity
 import com.valeri.doomscroll.data.db.ReasonEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -29,11 +31,21 @@ class DoomscrollRepository private constructor(context: Context) {
         monitoredApps.map { apps -> apps.filter { it.enabled }.map { it.packageName }.toSet() }
 
     /**
+     * Guards seedIfEmpty(). It is called independently from both the accessibility service
+     * (on connect) and the settings screen (on open), which can run at the same moment on a
+     * fresh install. Without this, both callers can pass the "is anything seeded yet" check
+     * before either has inserted anything, and each then runs its own delete-then-insert —
+     * producing two copies of every built-in rule and default reason. The check and the write
+     * must be one atomic step, not two.
+     */
+    private val seedMutex = Mutex()
+
+    /**
      * Seeds the shipped rules, apps and reasons the first time the database is opened.
      * Done lazily rather than in a Room callback so it can be re-checked cheaply and stays
      * ordinary suspending code.
      */
-    suspend fun seedIfEmpty() {
+    suspend fun seedIfEmpty() = seedMutex.withLock {
         // A shipped rule set that can never be corrected on an existing install is worse than
         // no rule set at all, so replace the built-ins whenever their version moves. Custom
         // rules the user added are left alone.
