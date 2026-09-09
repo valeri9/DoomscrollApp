@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.time.LocalTime
 
@@ -72,6 +73,7 @@ class SettingsStore(private val context: Context) {
         val minScrolls = intPreferencesKey("min_scroll_events")
         val minDwell = intPreferencesKey("min_dwell_seconds")
         val enabled = booleanPreferencesKey("enabled")
+        val builtInRulesVersion = intPreferencesKey("built_in_rules_version")
     }
 
     val settings: Flow<Settings> = context.dataStore.data.map { prefs ->
@@ -105,6 +107,12 @@ class SettingsStore(private val context: Context) {
     suspend fun setMinScrollEvents(count: Int) = edit { it[Keys.minScrolls] = count }
     suspend fun setMinDwellSeconds(seconds: Int) = edit { it[Keys.minDwell] = seconds }
     suspend fun setEnabled(enabled: Boolean) = edit { it[Keys.enabled] = enabled }
+
+    suspend fun builtInRulesVersion(): Int =
+        context.dataStore.data.map { it[Keys.builtInRulesVersion] ?: 0 }.first()
+
+    suspend fun setBuiltInRulesVersion(version: Int) =
+        edit { it[Keys.builtInRulesVersion] = version }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit(block)
