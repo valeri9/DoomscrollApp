@@ -9,6 +9,7 @@ import com.valeri.doomscroll.data.db.PackageTotal
 import com.valeri.doomscroll.data.db.ReasonCount
 import com.valeri.doomscroll.data.repo.DoomscrollRepository
 import com.valeri.doomscroll.usage.UsageStatsImporter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 data class DayUsage(val date: LocalDate, val totalMs: Long)
@@ -88,19 +90,30 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
         _range.value = days
     }
 
-    /** Runs on first open of the dashboard once Usage Access has been granted. */
+    /**
+     * Runs on first open of the dashboard once Usage Access has been granted.
+     *
+     * viewModelScope defaults to Main. UsageStatsManager.queryEvents() is a blocking call,
+     * and backfill() then walks up to 45 days of event history synchronously with no
+     * dispatcher switch of its own — without withContext(IO) this stalls the main thread
+     * on first open, right when the user is looking at the dashboard.
+     */
     fun importIfNeeded() = viewModelScope.launch {
-        if (importer.hasBackfilled()) {
-            importer.syncRecent()
-            return@launch
+        withContext(Dispatchers.IO) {
+            if (importer.hasBackfilled()) {
+                importer.syncRecent()
+                return@withContext
+            }
+            _importing.value = true
+            runCatching { importer.backfill() }
+            runCatching { importer.syncRecent() }
+            _importing.value = false
         }
-        _importing.value = true
-        runCatching { importer.backfill() }
-        runCatching { importer.syncRecent() }
-        _importing.value = false
     }
 
-    fun refresh() = viewModelScope.launch { runCatching { importer.syncRecent() } }
+    fun refresh() = viewModelScope.launch {
+        withContext(Dispatchers.IO) { runCatching { importer.syncRecent() } }
+    }
 
     /** Days with no rows still need a bar, otherwise the chart silently compresses time. */
     private fun fillMissingDays(totals: List<DailyTotal>, from: LocalDate, days: Int): List<DayUsage> {

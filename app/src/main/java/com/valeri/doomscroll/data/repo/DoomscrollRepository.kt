@@ -101,8 +101,20 @@ class DoomscrollRepository private constructor(context: Context) {
     suspend fun addMonitoredApp(packageName: String) =
         db.monitoredApps().upsert(MonitoredAppEntity(packageName = packageName))
 
-    suspend fun setAppEnabled(packageName: String, enabled: Boolean) =
-        db.monitoredApps().upsert(MonitoredAppEntity(packageName = packageName, enabled = enabled))
+    // Upsert replaces the whole row on the packageName conflict, including addedAt's
+    // System.currentTimeMillis() default — building a fresh entity here silently reset
+    // addedAt (and therefore the app's position in observeAll()'s ORDER BY addedAt) every
+    // time a switch was toggled. Preserve the original addedAt when the row already exists.
+    suspend fun setAppEnabled(packageName: String, enabled: Boolean) {
+        val existing = db.monitoredApps().getAll().firstOrNull { it.packageName == packageName }
+        db.monitoredApps().upsert(
+            MonitoredAppEntity(
+                packageName = packageName,
+                enabled = enabled,
+                addedAt = existing?.addedAt ?: System.currentTimeMillis(),
+            )
+        )
+    }
 
     suspend fun removeMonitoredApp(packageName: String) = db.monitoredApps().remove(packageName)
 

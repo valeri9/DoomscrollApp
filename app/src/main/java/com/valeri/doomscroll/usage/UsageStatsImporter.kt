@@ -49,12 +49,24 @@ class UsageStatsImporter(private val context: Context) {
      * through a call with the screen blanked by the proximity sensor. Filtering to launchable
      * packages is the same rule the app picker uses.
      */
-    private val launchablePackages: Set<String> by lazy {
-        runCatching {
+    // Not cached with `by lazy`: queryIntentActivities failing (binder death, a restricted
+    // profile, any RuntimeException) used to be indistinguishable from it genuinely
+    // returning empty, since both fell through the same getOrDefault(emptySet()) — and a
+    // `by lazy` then pinned that empty result, and its "isEmpty() means no filter" escape
+    // hatch, for this importer's entire lifetime, silently letting systemui/incallui back
+    // into every later import's totals. Caching only the success case means a transient
+    // failure is retried on the next call instead of poisoning every import after it.
+    private var cachedLaunchablePackages: Set<String>? = null
+
+    private fun launchablePackages(): Set<String>? {
+        cachedLaunchablePackages?.let { return it }
+        return runCatching {
             context.packageManager.queryIntentActivities(
                 Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
             ).mapNotNull { it.activityInfo?.packageName }.toSet()
-        }.getOrDefault(emptySet())
+        }.onFailure {
+            Log.w(Tag.SERVICE, "launchable package query failed, not filtering this import: ${it.message}")
+        }.getOrNull()?.also { cachedLaunchablePackages = it }
     }
 
     /**
@@ -136,9 +148,9 @@ class UsageStatsImporter(private val context: Context) {
         // Whatever is still open runs up to the end of the window.
         resumedAt.forEach { (pkg, began) -> accumulate(totals, pkg, began, endMillis) }
 
-        val launchable = launchablePackages
+        val launchable = launchablePackages()
         val rows = totals
-            .filterKeys { launchable.isEmpty() || it.first in launchable }
+            .filterKeys { launchable == null || launchable.isEmpty() || it.first in launchable }
             .filterValues { it > 0 }
             .map { (key, ms) ->
                 DailyAppUsageEntity(localDate = key.second, packageName = key.first, foregroundMs = ms)

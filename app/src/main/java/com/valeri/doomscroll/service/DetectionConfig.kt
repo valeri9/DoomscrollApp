@@ -25,7 +25,4 @@ object DetectionConfig {
 
     /** Re-classification is at most this often; results are cached in between. */
     const val CLASSIFY_THROTTLE_MS = 750L
-
-    /** Length of the normal-hours breathing exercise. */
-    const val BREATHING_SECONDS = 10
 }

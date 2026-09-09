@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.valeri.doomscroll.service.DetectionConfig
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -26,11 +27,15 @@ data class Settings(
     val nightEscalationSeconds: Int = 10,
     val nightContinueDelaySeconds: Int = 5,
     val nightMinReasonChars: Int = 15,
-    val cooldownMinutes: Int = 3,
-    val minScrollEvents: Int = 3,
-    val minDwellSeconds: Int = 5,
+    // These four restated DetectionConfig's constants as independent literals — two sources
+    // of truth for the same tuning defaults that had to be hand-edited in lockstep (see the
+    // commit lowering the re-arm default from 10 to 4 minutes) and could easily drift apart
+    // if only one were changed. Deriving them from DetectionConfig makes it the single source.
+    val cooldownMinutes: Int = (DetectionConfig.COOLDOWN_MS / 60_000L).toInt(),
+    val minScrollEvents: Int = DetectionConfig.MIN_SCROLL_EVENTS,
+    val minDwellSeconds: Int = (DetectionConfig.MIN_DWELL_MS / 1_000L).toInt(),
     /** Re-arm during one long sitting. 0 means one intervention per visit. */
-    val reArmAfterMinutes: Int = 4,
+    val reArmAfterMinutes: Int = (DetectionConfig.RE_ARM_AFTER_MS / 60_000L).toInt(),
     val enabled: Boolean = true,
 ) {
     val cooldownMs: Long get() = cooldownMinutes * 60_000L
