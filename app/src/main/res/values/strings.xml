@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Doomscroll</string>
+    <string name="accessibility_service_label">Doomscroll</string>
+    <string name="accessibility_service_description">Watches only the apps you choose, so it can tell the difference between scrolling a feed and reading your messages. It shows a pause screen when you start doomscrolling, and stays out of the way otherwise. Nothing is ever sent off your phone.</string>
+</resources>

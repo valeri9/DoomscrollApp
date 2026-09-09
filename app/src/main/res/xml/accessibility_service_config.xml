@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  packageNames is deliberately omitted here and set at runtime from
+  DoomscrollAccessibilityService.applyMonitoredPackages(). Filtering at the framework
+  level means the system never delivers us events from unmonitored apps at all, which is
+  the single biggest battery saving available to an accessibility service.
+
+  flagReportViewIds is mandatory: without it getViewIdResourceName() returns null and
+  the entire classifier is inert.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="100"
+    android:settingsActivity="com.valeri.doomscroll.ui.MainActivity" />
