@@ -11,6 +11,11 @@
     <!-- Needed to list installed apps in the monitored-app picker. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Keeps this process's priority elevated for the few seconds an intervention overlay
+         is on screen, so One UI's background process freezer can't suspend the whole
+         process (breathing countdown included) mid-display. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="false"
@@ -40,6 +45,15 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <service
+            android:name=".overlay.InterventionForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the intervention overlay visible and responsive while the system's background process management would otherwise freeze the app mid-display" />
         </service>
     </application>
 </manifest>

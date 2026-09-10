@@ -59,6 +59,7 @@ fun InterventionScreen(spec: InterventionSpec, onComplete: (InterventionResult) 
             while (remaining > 0) {
                 delay(1000)
                 remaining--
+                android.util.Log.d("DoomscrollOverlay", "tick remaining=$remaining")
             }
             breathingDone = true
         }

@@ -37,6 +37,14 @@ object BuiltInRules {
             "direct_inbox_action_bar",                    // DM inbox
             "inbox_refreshable_thread_list_recyclerview", // DM thread list
             "row_thread_composer_edittext",               // typing in a DM thread
+            // Stories render on top of the main feed screen without tearing it down, so
+            // main_feed_action_bar's node is still attached (and, per its own collapsed
+            // scroll state, can still read as on-screen) while a story is playing — a
+            // sustained false DOOMSCROLL match, not a brief cache-staleness blip. These are
+            // exclusive to the story viewer itself, confirmed against the feed, Explore and
+            // DM captures, and as LEGIT rules they win outright over that stale match.
+            "reel_viewer_root",
+            "reel_viewer_progress_bar",
         ) + doomscroll(
             INSTAGRAM,
             "clips_viewer_view_pager",                    // Reels
@@ -66,7 +74,7 @@ object BuiltInRules {
      * Bump when the rules above change, so an existing install replaces its seeded built-ins
      * instead of keeping stale ones forever. Custom rules are never touched.
      */
-    const val VERSION = 2
+    const val VERSION = 3
 
     val defaultMonitoredPackages: Set<String> = setOf(INSTAGRAM, TIKTOK, TIKTOK_ALT)
 

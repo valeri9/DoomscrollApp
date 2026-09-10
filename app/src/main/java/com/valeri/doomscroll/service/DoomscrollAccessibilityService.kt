@@ -11,6 +11,7 @@ import com.valeri.doomscroll.data.repo.DoomscrollRepository
 import com.valeri.doomscroll.data.repo.toDomain
 import com.valeri.doomscroll.learn.LearnMode
 import com.valeri.doomscroll.learn.NodeInspector
+import com.valeri.doomscroll.overlay.InterventionForegroundService
 import com.valeri.doomscroll.overlay.InterventionSpec
 import com.valeri.doomscroll.overlay.OverlayController
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +52,10 @@ class DoomscrollAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         overlay = OverlayController(this)
         repo = DoomscrollRepository.get(this)
+        // Pre-create the notification channel InterventionForegroundService needs, so its
+        // first-ever activation doesn't pay that one-time setup cost on the same frame as
+        // the first real overlay.
+        InterventionForegroundService.ensureChannel(this)
 
         scope.launch {
             // seedIfEmpty() must complete before allRules is ever subscribed to. Starting

@@ -116,12 +116,20 @@ class OverlayController(private val service: AccessibilityService) {
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
 
+        // Started before addView, not after: the window being on top of everything does
+        // not by itself raise this process's priority, and the gap between adding the
+        // window and the freezer next running its check is exactly where a race would
+        // otherwise put us back at risk.
+        runCatching { InterventionForegroundService.start(service) }
+            .onFailure { Log.w(Tag.OVERLAY, "could not start foreground service: ${it.message}") }
+
         try {
             windowManager.addView(view, params)
         } catch (e: Exception) {
             Log.e(Tag.OVERLAY, "addView failed", e)
             owner.onDestroy()
             isShowing = false
+            runCatching { InterventionForegroundService.stop(service) }
             return
         }
 
@@ -144,6 +152,9 @@ class OverlayController(private val service: AccessibilityService) {
             container = null
             lifecycleOwner = null
             isShowing = false
+            // stopService on an already-stopped service is a documented no-op, so this is
+            // safe even if show() never got as far as starting it.
+            runCatching { InterventionForegroundService.stop(service) }
         }
     }
 
