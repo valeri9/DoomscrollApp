@@ -53,19 +53,34 @@ object BuiltInRules {
         )
 
     /**
-     * Unverified. Camera, posting and profile screens are deliberately absent: with
-     * fail-closed classification an unrecognised screen is already left alone, so a legit
-     * rule is only needed where it must override a doomscroll match.
+     * Verified on device for TIKTOK (com.zhiliaoapp.musically) only — TIKTOK_ALT
+     * (com.ss.android.ugc.trill, a regional build) isn't installed here to check against, so
+     * it inherits the same rules on the assumption the two share a codebase; re-verify with
+     * Learn Mode if that assumption turns out wrong for that build.
+     *
+     * Most of TikTok's resource ids are R8-obfuscated to meaningless 3-character codes (bjf,
+     * ekn, w3g, ...) that could shift on any update — the opposite of Instagram's descriptive
+     * ones, and not worth anchoring rules to. These few survive obfuscation, are semantically
+     * named, and were confirmed mutually exclusive between the For You feed and the Inbox
+     * (chat list) captures: none of the feed markers appear on Inbox, and vice versa.
+     *
+     * viewpager itself — the obvious first choice for "the feed" — is a trap here exactly
+     * like Instagram's swipeable_nav_view_pager_inner_recycler_view was: it's present on
+     * both the feed and Inbox, so it would fire while reading messages.
+     *
+     * Camera, posting and profile screens are deliberately absent: with fail-closed
+     * classification an unrecognised screen is already left alone, so a legit rule is only
+     * needed where it must override a doomscroll match.
      */
     private fun tiktokFor(pkg: String): List<ContextRule> =
         legit(
             pkg,
-            "chat_list",
-            "im_chat_recycler",
+            "user_name",     // Inbox chat-row title
+            "v_status_bar",  // Inbox-only status indicator
         ) + doomscroll(
             pkg,
-            "vs_feed_container",
-            "aweme_feed_root",
+            "player_view",             // For You / Following video player
+            "video_container_area",    // video content wrapper
         )
 
     val all: List<ContextRule> = instagram + tiktokFor(TIKTOK) + tiktokFor(TIKTOK_ALT)
@@ -74,7 +89,7 @@ object BuiltInRules {
      * Bump when the rules above change, so an existing install replaces its seeded built-ins
      * instead of keeping stale ones forever. Custom rules are never touched.
      */
-    const val VERSION = 3
+    const val VERSION = 4
 
     val defaultMonitoredPackages: Set<String> = setOf(INSTAGRAM, TIKTOK, TIKTOK_ALT)
 

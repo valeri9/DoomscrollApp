@@ -152,29 +152,36 @@ private fun BreathingPane(remaining: Int, appLabel: String, isNight: Boolean) {
 private fun ReasonPane(spec: InterventionSpec, onComplete: (InterventionResult) -> Unit) {
     var pickedLabel by remember { mutableStateOf<String?>(null) }
     var typed by remember { mutableStateOf("") }
-    var submitted by remember { mutableStateOf(false) }
     var continueDelay by remember { mutableIntStateOf(0) }
 
-    // The extra wait only starts once a reason is actually given.
-    LaunchedEffect(submitted) {
-        if (!submitted) return@LaunchedEffect
+    val typedLongEnough = typed.trim().length >= spec.minReasonChars
+    // If there is nothing to pick — every reason for this app was deleted in Settings, or
+    // some future path leaves the list empty — treat that as already satisfied rather than
+    // as a block on continuing; it must never gate an action there's no way to complete.
+    val hasReason = if (spec.requireTypedReason) typedLongEnough else {
+        pickedLabel != null || spec.reasons.isEmpty()
+    }
+
+    // The delay is friction on CONTINUING, specifically — closing the app is the outcome
+    // this whole screen exists to make easy, so it is never gated on a reason or a wait.
+    // Starts counting the moment a reason becomes valid, not behind a separate submit step.
+    LaunchedEffect(hasReason) {
+        if (!hasReason) return@LaunchedEffect
         continueDelay = spec.continueDelaySeconds
         while (continueDelay > 0) {
             delay(1000)
             continueDelay--
         }
     }
+    val canContinue = hasReason && continueDelay == 0
 
-    val typedLongEnough = typed.trim().length >= spec.minReasonChars
-    // If there is nothing to pick — every reason for this app was deleted in Settings, or
-    // some future path leaves the list empty — the overlay must never become unclosable.
-    // BACK is deliberately swallowed here, so an unmet gate with nothing to satisfy it would
-    // trap the user until the 5-minute safety timeout. Treat "nothing to choose from" as
-    // already satisfied rather than as blocked.
-    val canSubmit = if (spec.requireTypedReason) typedLongEnough else {
-        pickedLabel != null || spec.reasons.isEmpty()
-    }
-    val canContinue = submitted && continueDelay == 0
+    fun complete(continuedAnyway: Boolean) = onComplete(
+        InterventionResult(
+            reasonLabel = pickedLabel,
+            reasonText = typed.trim().takeIf { it.isNotEmpty() },
+            continuedAnyway = continuedAnyway,
+        )
+    )
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -185,30 +192,29 @@ private fun ReasonPane(spec: InterventionSpec, onComplete: (InterventionResult) 
             .imePadding()
             .padding(horizontal = 28.dp, vertical = 32.dp),
     ) {
+        Button(
+            onClick = { complete(false) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Palette.Mist,
+                contentColor = Palette.Ink,
+            ),
+        ) {
+            Text("Close the app", fontSize = 16.sp, modifier = Modifier.padding(vertical = 6.dp))
+        }
+
         Text(
-            text = "Why are you here?",
-            color = Palette.TextPrimary,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-        )
-        Text(
-            text = if (spec.requireTypedReason) {
-                "Write it out — at least ${spec.minReasonChars} characters."
-            } else {
-                "One tap. No wrong answer."
-            },
+            text = "or, if you're staying — why are you here?",
             color = Palette.TextMuted,
-            fontSize = 14.sp,
+            fontSize = 13.sp,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
+            modifier = Modifier.padding(top = 28.dp, bottom = 16.dp),
         )
 
         if (spec.requireTypedReason) {
             OutlinedTextField(
                 value = typed,
-                onValueChange = { if (!submitted) typed = it },
-                enabled = !submitted,
+                onValueChange = { typed = it },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
                 placeholder = { Text("What made you open it?", color = Palette.TextMuted) },
@@ -235,7 +241,7 @@ private fun ReasonPane(spec: InterventionSpec, onComplete: (InterventionResult) 
             spec.reasons.forEach { reason ->
                 val selected = pickedLabel == reason
                 OutlinedButton(
-                    onClick = { if (!submitted) pickedLabel = reason },
+                    onClick = { pickedLabel = reason },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = if (selected) Palette.Ink else Palette.TextPrimary,
@@ -247,64 +253,26 @@ private fun ReasonPane(spec: InterventionSpec, onComplete: (InterventionResult) 
             }
         }
 
-        if (!submitted) {
-            Button(
-                onClick = { submitted = true },
-                enabled = canSubmit,
-                modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Palette.Mist,
-                    contentColor = Palette.Ink,
-                    disabledContainerColor = Palette.SurfaceAlt,
-                    disabledContentColor = Palette.TextMuted,
-                ),
-            ) {
-                Text("Done", fontSize = 16.sp, modifier = Modifier.padding(vertical = 6.dp))
-            }
-        } else {
-            Button(
-                onClick = {
-                    onComplete(
-                        InterventionResult(
-                            reasonLabel = pickedLabel,
-                            reasonText = typed.trim().takeIf { it.isNotEmpty() },
-                            continuedAnyway = true,
-                        )
-                    )
+        Button(
+            onClick = { complete(true) },
+            enabled = canContinue,
+            modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Palette.SurfaceAlt,
+                contentColor = Palette.TextPrimary,
+                disabledContainerColor = Palette.SurfaceAlt,
+                disabledContentColor = Palette.TextMuted,
+            ),
+        ) {
+            Text(
+                when {
+                    canContinue -> "Continue anyway"
+                    hasReason -> "Continue anyway ($continueDelay)"
+                    else -> "Continue anyway"
                 },
-                enabled = canContinue,
-                modifier = Modifier.fillMaxWidth().padding(top = 20.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Palette.SurfaceAlt,
-                    contentColor = Palette.TextPrimary,
-                    disabledContainerColor = Palette.SurfaceAlt,
-                    disabledContentColor = Palette.TextMuted,
-                ),
-            ) {
-                Text(
-                    if (canContinue) "Continue anyway" else "Continue anyway ($continueDelay)",
-                    fontSize = 16.sp,
-                    modifier = Modifier.padding(vertical = 6.dp),
-                )
-            }
-            Button(
-                onClick = {
-                    onComplete(
-                        InterventionResult(
-                            reasonLabel = pickedLabel,
-                            reasonText = typed.trim().takeIf { it.isNotEmpty() },
-                            continuedAnyway = false,
-                        )
-                    )
-                },
-                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Palette.Mist,
-                    contentColor = Palette.Ink,
-                ),
-            ) {
-                Text("Close the app", fontSize = 16.sp, modifier = Modifier.padding(vertical = 6.dp))
-            }
+                fontSize = 16.sp,
+                modifier = Modifier.padding(vertical = 6.dp),
+            )
         }
     }
 }
