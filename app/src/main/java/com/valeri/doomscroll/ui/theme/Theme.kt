@@ -56,9 +56,9 @@ fun DoomscrollTheme(
  * >= 3:1 contrast against the Ink surface.
  */
 object ChartPalette {
-    /** Series 1 — screen time. Also the single-series colour for the daily trend. */
+    /** Series 1 — doomscroll / app time, and "closed" in the after-the-breath split. */
     val Teal = Color(0xFF12A88C)
-    /** Series 2 — night-time share. */
+    /** Series 2 — "continued anyway" in the after-the-breath split. */
     val Amber = Color(0xFFD97828)
     /** Recessive grid and axis lines. */
     val Grid = Color(0xFF232B3B)

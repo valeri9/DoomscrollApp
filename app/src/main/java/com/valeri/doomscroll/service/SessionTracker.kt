@@ -17,17 +17,16 @@ package com.valeri.doomscroll.service
  * session, so ducking into messages and back does not earn a fresh pass.
  *
  * A third, separate hook — noteClosedByIntervention()/consumeForceReopen() — catches tapping
- * "Close the app" and immediately reopening it: that "close" is only GLOBAL_ACTION_HOME, the
- * app is never actually killed, so without this the reopen would silently inherit the old
- * armed=false state and buy several free minutes of scrolling before the normal re-arm timer
- * caught up.
+ * "Close the app" and then opening ANY watched app within the window: the same one again, or
+ * a different one. That "close" is only GLOBAL_ACTION_HOME, so the app itself stays alive and
+ * reopening it would silently inherit the old armed=false state; and every other watched app
+ * has its own fresh, armed session that still needs a full scroll/dwell run before it fires.
+ * Either way the urge just moves somewhere else, so the mark is global, not per app.
  *
- * KNOWN TRADE-OFF (not a bug to fix, just to know about): that same hook means sitting through
- * the breathing prompt fully and then tapping "Close the app" right after is itself a reopen —
- * reopening within cheatReopenWindowMs forces the prompt again, with no cap on how many times
- * in a row. Repeatedly closing and reopening therefore repeats the prompt every time, which is
- * annoying if you keep doing it on purpose, but the alternative (letting some number of closes
- * through unchallenged) is exactly the loophole this hook exists to close. Left as-is for now.
+ * KNOWN TRADE-OFF (not a bug to fix, just to know about): repeatedly closing and reopening —
+ * in the same app or by hopping between them — repeats the prompt every time, with no cap.
+ * Annoying if you keep doing it on purpose, but letting some number of closes through
+ * unchallenged is exactly the loophole this hook exists to close. Left as-is for now.
  */
 class SessionTracker(
     @Volatile var cooldownMs: Long = DetectionConfig.COOLDOWN_MS,
@@ -45,11 +44,12 @@ class SessionTracker(
         var lastSeenAt: Long = 0L,
         var triggeredAt: Long = 0L,
         var scrollEvents: Int = 0,
-        /** Set when "Close the app" is tapped; consumed by consumeForceReopen(). */
-        var closedByInterventionAt: Long = 0L,
     )
 
     private val states = mutableMapOf<String, State>()
+
+    /** When "Close the app" was last tapped, in any app. Consumed by consumeForceReopen(). */
+    private var closedByInterventionAt: Long = 0L
 
     /**
      * Called for every event from a monitored app. Starts a new session when the app has been
@@ -104,31 +104,30 @@ class SessionTracker(
         return true
     }
 
-    /** Call when "Close the app" is tapped, so a reopen inside cheatReopenWindowMs is caught. */
-    fun noteClosedByIntervention(packageName: String) {
-        states.getOrPut(packageName) { State() }.closedByInterventionAt = now()
+    /** Call when "Close the app" is tapped, in any app. */
+    fun noteClosedByIntervention() {
+        closedByInterventionAt = now()
     }
 
     /**
-     * Call on every reopen (TYPE_WINDOW_STATE_CHANGED) of a monitored app, before any normal
-     * classification/scroll gating. Returns true — once — if this reopen lands inside
-     * cheatReopenWindowMs of a prior "Close the app" tap, meaning the caller should force the
-     * breathing prompt straight back up rather than waiting for scroll/dwell thresholds.
+     * Call when any watched app comes to the front (TYPE_WINDOW_STATE_CHANGED), before the
+     * normal scroll/dwell gating. Returns true — once — if that happens inside
+     * cheatReopenWindowMs of a "Close the app" tap anywhere, meaning the caller should put
+     * the breathing prompt straight back up.
      *
-     * One-shot by design: the mark is cleared the moment it's checked, whether or not the
-     * window was still open, so a later reopen of the same visit is judged fresh rather than
-     * matching the same close indefinitely.
+     * One-shot: the mark is cleared the moment it's checked, whether or not it was still in
+     * the window, so only the first app opened after a close is judged against it.
      */
     fun consumeForceReopen(packageName: String): Boolean {
-        val state = states[packageName] ?: return false
-        val closedAt = state.closedByInterventionAt
+        val closedAt = closedByInterventionAt
         if (closedAt == 0L) return false
-        state.closedByInterventionAt = 0L
+        closedByInterventionAt = 0L
         val moment = now()
         if (moment - closedAt > cheatReopenWindowMs) return false
 
-        // Treat this like a genuine trigger so re-arm timing stays consistent with a normal
-        // scroll-driven one.
+        // Treat this like a genuine trigger in the app being opened, so its re-arm timing
+        // stays consistent with a normal scroll-driven one.
+        val state = states.getOrPut(packageName) { State() }
         state.armed = false
         state.scrollEvents = 0
         state.sessionStartedAt = moment
@@ -136,7 +135,10 @@ class SessionTracker(
         return true
     }
 
-    fun reset() = states.clear()
+    fun reset() {
+        states.clear()
+        closedByInterventionAt = 0L
+    }
 
     fun debugState(packageName: String): String {
         val s = states[packageName] ?: return "no session"

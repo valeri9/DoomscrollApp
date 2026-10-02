@@ -29,15 +29,19 @@ object DetectionConfig {
     const val CLASSIFY_THROTTLE_MS = 750L
 
     /**
-     * "Close the app" only does GLOBAL_ACTION_HOME — the app itself is still alive in the
-     * background, not killed, so reopening it resumes the exact same paused screen. Without
-     * this, that reopen is a free cheat: the session's armed/re-arm state survives the trip
-     * home untouched (there's no event from the launcher to reset it, since only monitored
-     * packages are ever reported to us), so scrolling straight back in doesn't earn a new
-     * breathing prompt until reArmAfterMs quietly elapses on its own. Reopening the app within
-     * this window of tapping "Close the app" instead forces the breathing prompt right back
-     * up immediately, before a single scroll — closing the loophole the delay would otherwise
-     * be.
+     * Opening any watched app within this long of tapping "Close the app" puts the breathing
+     * prompt straight back up, before a single scroll. Covers both reopening the same app (it
+     * was only sent home, never killed, so it would resume with no prompt due) and hopping to
+     * a different one (whose own session is fresh and would need a full scroll/dwell run).
      */
     const val CHEAT_REOPEN_WINDOW_MS = 60 * 1000L
+
+    /**
+     * Doomscroll-time tracking credits the gap between two events on a doomscroll screen only
+     * if it's at most this long; anything longer is treated as having left without being told.
+     */
+    const val DOOMSCROLL_MAX_GAP_MS = 60 * 1000L
+
+    /** Counted doomscroll time is written to the database in batches of at least this much. */
+    const val DOOMSCROLL_FLUSH_MS = 15 * 1000L
 }

@@ -76,6 +76,17 @@ data class DailyAppUsageEntity(
     val updatedAt: Long = System.currentTimeMillis(),
 )
 
+/**
+ * Time actually spent on doomscroll screens, per app per day, measured by the accessibility
+ * service. Unlike daily_app_usage this has no OS history behind it: it starts the day it ships.
+ */
+@Entity(tableName = "doomscroll_time", primaryKeys = ["localDate", "packageName"])
+data class DoomscrollTimeEntity(
+    val localDate: String,
+    val packageName: String,
+    val ms: Long,
+)
+
 /** Single-row bookkeeping for the usage importer. */
 @Entity(tableName = "usage_sync_state")
 data class UsageSyncStateEntity(

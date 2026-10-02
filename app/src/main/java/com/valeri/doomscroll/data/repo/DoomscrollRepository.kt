@@ -184,24 +184,27 @@ class DoomscrollRepository private constructor(context: Context) {
 
     suspend fun nightInterventionsSince(since: Long): Int = db.interventions().countNightSince(since)
 
-    fun recentInterventions(limit: Int = 50) = db.interventions().observeRecent(limit)
-    fun dailyInterventionCounts(fromDate: LocalDate) =
-        db.interventions().observeDailyCounts(fromDate.toString())
-    fun packageInterventionCounts(fromDate: LocalDate) =
-        db.interventions().observePackageCounts(fromDate.toString())
-    fun reasonCounts(fromDate: LocalDate) = db.interventions().observeReasonCounts(fromDate.toString())
-    fun nightCount(fromDate: LocalDate) = db.interventions().observeNightCount(fromDate.toString())
-    fun totalInterventions(fromDate: LocalDate) =
-        db.interventions().observeTotalCount(fromDate.toString())
+    fun interventionsSince(fromDate: LocalDate) = db.interventions().observeSince(fromDate.toString())
+
+    // --- doomscroll time ---------------------------------------------------------------
+
+    suspend fun addDoomscrollTime(date: LocalDate, packageName: String, ms: Long) =
+        db.doomscrollTime().add(date.toString(), packageName, ms)
+
+    fun doomscrollTimeSince(fromDate: LocalDate) = db.doomscrollTime().observeSince(fromDate.toString())
+    val doomscrollTrackingSince: Flow<String?> = db.doomscrollTime().observeFirstDate()
 
     // --- usage -------------------------------------------------------------------------
 
     val usageDao get() = db.usage()
 
-    fun dailyUsageTotals(fromDate: LocalDate) = db.usage().observeDailyTotals(fromDate.toString())
-    fun packageUsageTotals(fromDate: LocalDate) = db.usage().observePackageTotals(fromDate.toString())
-
     companion object {
+        /** contextLabel for a prompt forced by reopening the app that was just closed. */
+        const val CONTEXT_REOPENED = "reopened after closing"
+
+        /** contextLabel for a prompt forced by opening a different watched app right after closing one. */
+        const val CONTEXT_SWITCHED = "switched apps after closing"
+
         private val DEFAULT_REASONS = listOf(
             "Bored",
             "Habit",

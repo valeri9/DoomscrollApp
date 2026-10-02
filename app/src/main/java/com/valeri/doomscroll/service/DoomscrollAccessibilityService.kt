@@ -9,6 +9,8 @@ import com.valeri.doomscroll.classifier.RuleEngine
 import com.valeri.doomscroll.classifier.ScreenClass
 import com.valeri.doomscroll.data.Settings
 import com.valeri.doomscroll.data.repo.DoomscrollRepository
+import com.valeri.doomscroll.data.repo.DoomscrollRepository.Companion.CONTEXT_REOPENED
+import com.valeri.doomscroll.data.repo.DoomscrollRepository.Companion.CONTEXT_SWITCHED
 import com.valeri.doomscroll.data.repo.toDomain
 import com.valeri.doomscroll.learn.LearnMode
 import com.valeri.doomscroll.learn.NodeInspector
@@ -32,6 +34,10 @@ class DoomscrollAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val ruleEngine = RuleEngine()
     private val sessions = SessionTracker()
+    private val doomscrollTimer = DoomscrollTimer()
+
+    /** The app "Close the app" was last tapped in; tells a reopen apart from a hop. Main thread only. */
+    private var lastClosedPackage: String? = null
     private lateinit var overlay: OverlayController
     private lateinit var repo: DoomscrollRepository
 
@@ -122,33 +128,61 @@ class DoomscrollAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 invalidateCache()
                 maybeCapture(packageName, event)
-                // Warm the cache so the first scroll doesn't pay for classification.
-                classify(packageName, event.className)
+                // Also warms the cache so the first scroll doesn't pay for classification.
+                countDoomscrollTime(packageName, classify(packageName, event.className))
 
-                // Reopening right after tapping "Close the app" is a cheat window, not a
-                // fresh visit — force the breathing prompt straight back up rather than
-                // waiting for scroll/dwell thresholds to earn it again.
+                // Opening any watched app right after tapping "Close the app" is the urge moving
+                // somewhere else, not a fresh visit — put the breath straight back up rather
+                // than waiting for scroll/dwell thresholds to earn it again.
                 if (!overlay.isShowing && sessions.consumeForceReopen(packageName)) {
-                    Log.i(Tag.SERVICE, "FORCE-REOPEN $packageName (closed and reopened within cheat window)")
-                    scope.launch { intervene(packageName, "reopened after closing") }
+                    val label = if (packageName == lastClosedPackage) CONTEXT_REOPENED else CONTEXT_SWITCHED
+                    Log.i(Tag.SERVICE, "FORCE-REOPEN $packageName ($label, closed $lastClosedPackage)")
+                    startIntervention(packageName, label)
                 }
             }
 
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
                 maybeCapture(packageName, event)
                 // Usually a cache hit; only recomputes once the throttle window lapses.
-                classify(packageName, event.className)
+                countDoomscrollTime(packageName, classify(packageName, event.className))
             }
 
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
                 if (overlay.isShowing) return
                 val result = classify(packageName, event.className)
+                countDoomscrollTime(packageName, result)
                 if (result.screenClass != ScreenClass.DOOMSCROLL) return
                 if (!sessions.onDoomscrollScroll(packageName)) return
 
                 Log.i(Tag.SERVICE, "TRIGGER $packageName (${result.describe})")
-                scope.launch { intervene(packageName, result.matchedRule?.pattern ?: "unknown") }
+                startIntervention(packageName, result.matchedRule?.pattern ?: "unknown")
             }
+        }
+    }
+
+    /** Stops the doomscroll clock on this thread, where it lives, before handing off. */
+    private fun startIntervention(packageName: String, contextLabel: String) {
+        doomscrollTimer.stop()
+        flushDoomscrollTime()
+        scope.launch { intervene(packageName, contextLabel) }
+    }
+
+    private fun countDoomscrollTime(packageName: String, result: RuleEngine.Classification) {
+        val onDoomscroll = result.screenClass == ScreenClass.DOOMSCROLL
+        doomscrollTimer.onEvent(packageName, onDoomscroll)
+        val pending = doomscrollTimer.pendingMs
+        if (pending >= DetectionConfig.DOOMSCROLL_FLUSH_MS || (!onDoomscroll && pending > 0L)) {
+            flushDoomscrollTime()
+        }
+    }
+
+    // Anything still pending when the service is torn down (under DOOMSCROLL_FLUSH_MS) is lost;
+    // not worth a write that outlives the scope for seconds of stats.
+    private fun flushDoomscrollTime() {
+        val batch = doomscrollTimer.drain()
+        if (batch.isEmpty()) return
+        scope.launch {
+            batch.forEach { (key, ms) -> repo.addDoomscrollTime(key.first, key.second, ms) }
         }
     }
 
@@ -205,11 +239,11 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                 // restarting from its own launch screen.
                 resumeApp(packageName)
             } else {
-                // Already home, and staying there is the whole point of "Close the app".
-                // GLOBAL_ACTION_HOME doesn't kill the app, though, so mark this so a reopen
-                // inside the cheat window forces the prompt straight back up instead of
-                // silently resuming the old armed state.
-                sessions.noteClosedByIntervention(packageName)
+                // Already home, and staying there is the whole point of "Close the app". Mark
+                // it so opening this app or any other watched one inside the window puts the
+                // prompt straight back up.
+                lastClosedPackage = packageName
+                sessions.noteClosedByIntervention()
             }
         }
     }

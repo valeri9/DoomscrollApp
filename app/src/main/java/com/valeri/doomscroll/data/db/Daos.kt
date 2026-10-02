@@ -86,23 +86,8 @@ interface InterventionDao {
     @Query("UPDATE interventions SET reasonLabel = :label, reasonText = :text, continuedAnyway = :continued, completedAt = :completedAt WHERE id = :id")
     suspend fun complete(id: Long, label: String?, text: String?, continued: Boolean, completedAt: Long)
 
-    @Query("SELECT * FROM interventions ORDER BY triggeredAt DESC LIMIT :limit")
-    fun observeRecent(limit: Int): Flow<List<InterventionEntity>>
-
-    @Query("SELECT localDate, COUNT(*) AS count FROM interventions WHERE localDate >= :fromDate GROUP BY localDate")
-    fun observeDailyCounts(fromDate: String): Flow<List<DailyCount>>
-
-    @Query("SELECT packageName, COUNT(*) AS count FROM interventions WHERE localDate >= :fromDate GROUP BY packageName")
-    fun observePackageCounts(fromDate: String): Flow<List<PackageCount>>
-
-    @Query("SELECT reasonLabel AS label, COUNT(*) AS count FROM interventions WHERE reasonLabel IS NOT NULL AND localDate >= :fromDate GROUP BY reasonLabel ORDER BY count DESC")
-    fun observeReasonCounts(fromDate: String): Flow<List<ReasonCount>>
-
-    @Query("SELECT COUNT(*) FROM interventions WHERE isNightMode = 1 AND localDate >= :fromDate")
-    fun observeNightCount(fromDate: String): Flow<Int>
-
-    @Query("SELECT COUNT(*) FROM interventions WHERE localDate >= :fromDate")
-    fun observeTotalCount(fromDate: String): Flow<Int>
+    @Query("SELECT * FROM interventions WHERE localDate >= :fromDate")
+    fun observeSince(fromDate: String): Flow<List<InterventionEntity>>
 
     /** Interventions already shown tonight, used to escalate repeat visits. */
     @Query("SELECT COUNT(*) FROM interventions WHERE isNightMode = 1 AND triggeredAt >= :since")
@@ -117,12 +102,6 @@ interface UsageDao {
     @Query("SELECT * FROM daily_app_usage WHERE localDate >= :fromDate ORDER BY localDate")
     fun observeSince(fromDate: String): Flow<List<DailyAppUsageEntity>>
 
-    @Query("SELECT localDate, SUM(foregroundMs) AS totalMs FROM daily_app_usage WHERE localDate >= :fromDate GROUP BY localDate ORDER BY localDate")
-    fun observeDailyTotals(fromDate: String): Flow<List<DailyTotal>>
-
-    @Query("SELECT packageName, SUM(foregroundMs) AS totalMs FROM daily_app_usage WHERE localDate >= :fromDate GROUP BY packageName ORDER BY totalMs DESC")
-    fun observePackageTotals(fromDate: String): Flow<List<PackageTotal>>
-
     @Query("SELECT * FROM usage_sync_state WHERE id = 0")
     suspend fun syncState(): UsageSyncStateEntity?
 
@@ -130,8 +109,22 @@ interface UsageDao {
     suspend fun setSyncState(state: UsageSyncStateEntity)
 }
 
-data class DailyCount(val localDate: String, val count: Int)
-data class PackageCount(val packageName: String, val count: Int)
-data class ReasonCount(val label: String, val count: Int)
-data class DailyTotal(val localDate: String, val totalMs: Long)
-data class PackageTotal(val packageName: String, val totalMs: Long)
+@Dao
+interface DoomscrollTimeDao {
+    /**
+     * Adds to the day's running total in one statement. Plain INSERT OR REPLACE with a
+     * subselect rather than SQLite's ON CONFLICT ... DO UPDATE upsert, which needs SQLite 3.24
+     * and minSdk 26 ships 3.18.
+     */
+    @Query(
+        "INSERT OR REPLACE INTO doomscroll_time (localDate, packageName, ms) VALUES (:localDate, :packageName, " +
+            "COALESCE((SELECT ms FROM doomscroll_time WHERE localDate = :localDate AND packageName = :packageName), 0) + :ms)"
+    )
+    suspend fun add(localDate: String, packageName: String, ms: Long)
+
+    @Query("SELECT * FROM doomscroll_time WHERE localDate >= :fromDate")
+    fun observeSince(fromDate: String): Flow<List<DoomscrollTimeEntity>>
+
+    @Query("SELECT MIN(localDate) FROM doomscroll_time")
+    fun observeFirstDate(): Flow<String?>
+}

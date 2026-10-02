@@ -6,6 +6,8 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.valeri.doomscroll.classifier.MatchType
 import com.valeri.doomscroll.classifier.RuleKind
 
@@ -33,8 +35,9 @@ class EnumConverters {
         InterventionEntity::class,
         DailyAppUsageEntity::class,
         UsageSyncStateEntity::class,
+        DoomscrollTimeEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(EnumConverters::class)
@@ -45,6 +48,7 @@ abstract class DoomscrollDatabase : RoomDatabase() {
     abstract fun reasons(): ReasonDao
     abstract fun interventions(): InterventionDao
     abstract fun usage(): UsageDao
+    abstract fun doomscrollTime(): DoomscrollTimeDao
 
     companion object {
         @Volatile private var instance: DoomscrollDatabase? = null
@@ -54,7 +58,16 @@ abstract class DoomscrollDatabase : RoomDatabase() {
                 context.applicationContext,
                 DoomscrollDatabase::class.java,
                 "doomscroll.db",
-            ).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+        }
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `doomscroll_time` (`localDate` TEXT NOT NULL, " +
+                        "`packageName` TEXT NOT NULL, `ms` INTEGER NOT NULL, PRIMARY KEY(`localDate`, `packageName`))"
+                )
+            }
         }
     }
 }

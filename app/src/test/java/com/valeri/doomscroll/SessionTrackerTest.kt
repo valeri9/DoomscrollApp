@@ -175,7 +175,7 @@ class SessionTrackerTest {
     @Test
     fun `reopening right after closing forces the prompt back up`() {
         val t = tracker()
-        t.noteClosedByIntervention(pkg)
+        t.noteClosedByIntervention()
         now += 5_000 // well inside the 60s cheat window
 
         assertTrue("reopen inside the window must force it", t.consumeForceReopen(pkg))
@@ -184,7 +184,7 @@ class SessionTrackerTest {
     @Test
     fun `reopening well after closing does not force the prompt`() {
         val t = tracker()
-        t.noteClosedByIntervention(pkg)
+        t.noteClosedByIntervention()
         now += 90_000 // past the 60s cheat window
 
         assertFalse("a real return trip later must not force it", t.consumeForceReopen(pkg))
@@ -193,11 +193,28 @@ class SessionTrackerTest {
     @Test
     fun `the forced reopen only fires once`() {
         val t = tracker()
-        t.noteClosedByIntervention(pkg)
+        t.noteClosedByIntervention()
         now += 5_000
 
         assertTrue(t.consumeForceReopen(pkg))
         assertFalse("already consumed; a second check must not re-fire", t.consumeForceReopen(pkg))
+    }
+
+    @Test
+    fun `closing one app and opening another forces the prompt there`() {
+        // Regression: caught on Reels, tap Close, open TikTok to keep scrolling. TikTok's own
+        // session is fresh and armed, so without a global mark it would need a full
+        // scroll/dwell run before anything fired.
+        val t = tracker()
+        val tiktok = "com.zhiliaoapp.musically"
+        t.noteActivity(pkg)
+        now += 10_000
+        repeat(3) { t.onDoomscrollScroll(pkg) }
+        t.noteClosedByIntervention()
+        now += 4_000
+
+        assertTrue("hopping to another watched app must force it", t.consumeForceReopen(tiktok))
+        assertFalse("and that forced prompt counts as TikTok's trigger", t.onDoomscrollScroll(tiktok))
     }
 
     @Test
