@@ -9,11 +9,12 @@ import org.junit.Test
 class SessionTrackerTest {
 
     private var now = 1_000_000L
-    private fun tracker(reArmAfterMs: Long = 0L) = SessionTracker(
+    private fun tracker(reArmAfterMs: Long = 0L, cheatReopenWindowMs: Long = 60_000L) = SessionTracker(
         cooldownMs = 180_000L,
         minScrollEvents = 3,
         minDwellMs = 5_000L,
         reArmAfterMs = reArmAfterMs,
+        cheatReopenWindowMs = cheatReopenWindowMs,
         now = { now },
     )
 
@@ -169,6 +170,43 @@ class SessionTrackerTest {
         now += 6_000
         assertFalse(t.onDoomscrollScroll(pkg))
         assertTrue("must still trigger without a prior activity event", t.onDoomscrollScroll(pkg))
+    }
+
+    @Test
+    fun `reopening right after closing forces the prompt back up`() {
+        val t = tracker()
+        t.noteClosedByIntervention(pkg)
+        now += 5_000 // well inside the 60s cheat window
+
+        assertTrue("reopen inside the window must force it", t.consumeForceReopen(pkg))
+    }
+
+    @Test
+    fun `reopening well after closing does not force the prompt`() {
+        val t = tracker()
+        t.noteClosedByIntervention(pkg)
+        now += 90_000 // past the 60s cheat window
+
+        assertFalse("a real return trip later must not force it", t.consumeForceReopen(pkg))
+    }
+
+    @Test
+    fun `the forced reopen only fires once`() {
+        val t = tracker()
+        t.noteClosedByIntervention(pkg)
+        now += 5_000
+
+        assertTrue(t.consumeForceReopen(pkg))
+        assertFalse("already consumed; a second check must not re-fire", t.consumeForceReopen(pkg))
+    }
+
+    @Test
+    fun `an app that was never closed via the button never force-fires`() {
+        val t = tracker()
+        t.noteActivity(pkg)
+        now += 5_000
+
+        assertFalse(t.consumeForceReopen(pkg))
     }
 
     @Test

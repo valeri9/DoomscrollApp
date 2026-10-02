@@ -1,6 +1,7 @@
 package com.valeri.doomscroll.service
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Intent
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -123,6 +124,14 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                 maybeCapture(packageName, event)
                 // Warm the cache so the first scroll doesn't pay for classification.
                 classify(packageName, event.className)
+
+                // Reopening right after tapping "Close the app" is a cheat window, not a
+                // fresh visit — force the breathing prompt straight back up rather than
+                // waiting for scroll/dwell thresholds to earn it again.
+                if (!overlay.isShowing && sessions.consumeForceReopen(packageName)) {
+                    Log.i(Tag.SERVICE, "FORCE-REOPEN $packageName (closed and reopened within cheat window)")
+                    scope.launch { intervene(packageName, "reopened after closing") }
+                }
             }
 
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
@@ -146,6 +155,14 @@ class DoomscrollAccessibilityService : AccessibilityService() {
     private suspend fun intervene(packageName: String, contextLabel: String) {
         val current = settings
         val isNight = current.isNight()
+
+        // The overlay draws an opaque screen on top, but the app underneath is not paused by
+        // that alone — its video (and audio) keeps running, invisibly, behind it. Sending it
+        // home for real, right now, triggers the same onPause/onStop most video players
+        // already use to pause themselves on backgrounding, so playback actually stops rather
+        // than merely being hidden. The task stays alive; resumeApp() below brings it back to
+        // this exact same screen if the user continues.
+        performGlobalAction(GLOBAL_ACTION_HOME)
 
         // Each reopen inside the same night window costs an extra escalation step.
         val breathingSeconds = if (isNight) {
@@ -182,9 +199,30 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                     continued = result.continuedAnyway,
                 )
             }
-            // "Close the app" only means something if we actually leave it.
-            if (!result.continuedAnyway) performGlobalAction(GLOBAL_ACTION_HOME)
+            if (result.continuedAnyway) {
+                // Already home from the top of this function; bring the same task back to
+                // the front so playback resumes right where it paused, instead of the app
+                // restarting from its own launch screen.
+                resumeApp(packageName)
+            } else {
+                // Already home, and staying there is the whole point of "Close the app".
+                // GLOBAL_ACTION_HOME doesn't kill the app, though, so mark this so a reopen
+                // inside the cheat window forces the prompt straight back up instead of
+                // silently resuming the old armed state.
+                sessions.noteClosedByIntervention(packageName)
+            }
         }
+    }
+
+    private fun resumeApp(packageName: String) {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        if (launchIntent == null) {
+            Log.w(Tag.SERVICE, "no launch intent for $packageName; cannot resume it")
+            return
+        }
+        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        runCatching { startActivity(launchIntent) }
+            .onFailure { Log.w(Tag.SERVICE, "could not resume $packageName: ${it.message}") }
     }
 
     private fun classify(packageName: String, className: CharSequence?): RuleEngine.Classification {

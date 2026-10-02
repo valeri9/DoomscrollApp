@@ -55,7 +55,17 @@ fun DashboardScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) permissionCheck++
+            if (event == Lifecycle.Event.ON_RESUME) {
+                permissionCheck++
+                // importIfNeeded() below only ever runs once per process, the first time
+                // hasUsageAccess turns true — coming back to this screen later (switching
+                // tabs, backgrounding and returning) doesn't re-trigger it. Without a sync
+                // here too, "today" is only as fresh as the last 30-minute background sync,
+                // which is exactly the kind of stale, under-counted total this was reported
+                // against: real usage kept accruing on the OS side after the last sync, and
+                // nothing pulled it in until the worker's next tick caught up.
+                vm.refresh()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }

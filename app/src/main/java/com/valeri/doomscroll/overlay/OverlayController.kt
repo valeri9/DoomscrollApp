@@ -1,7 +1,11 @@
 package com.valeri.doomscroll.overlay
 
 import android.accessibilityservice.AccessibilityService
+import android.content.Context
 import android.graphics.PixelFormat
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -22,10 +26,13 @@ class OverlayController(private val service: AccessibilityService) {
 
     private val windowManager =
         service.getSystemService(AccessibilityService.WINDOW_SERVICE) as WindowManager
+    private val audioManager =
+        service.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var container: BlockingFrameLayout? = null
     private var lifecycleOwner: OverlayLifecycleOwner? = null
+    private var audioFocusRequest: AudioFocusRequest? = null
 
     /** Last-resort dismissal so a bug can never leave the phone permanently covered. */
     private val safetyDismiss = Runnable {
@@ -123,12 +130,22 @@ class OverlayController(private val service: AccessibilityService) {
         runCatching { InterventionForegroundService.start(service) }
             .onFailure { Log.w(Tag.OVERLAY, "could not start foreground service: ${it.message}") }
 
+        // The overlay sits visually on top of the video, but the video's own window is still
+        // there underneath, still playing — the overlay does not pause it, so without this the
+        // audio keeps running under the breathing prompt. GAIN_TRANSIENT_EXCLUSIVE tells
+        // whoever is playing that it must actually stop, not just duck, for as long as we hold
+        // it; Instagram/TikTok's players do stop on that signal, which is the same mechanism a
+        // phone call uses to silence whatever was playing. Requesting it needs the foreground
+        // state started just above, or Android silently refuses it from a background process.
+        requestAudioFocus()
+
         try {
             windowManager.addView(view, params)
         } catch (e: Exception) {
             Log.e(Tag.OVERLAY, "addView failed", e)
             owner.onDestroy()
             isShowing = false
+            abandonAudioFocus()
             runCatching { InterventionForegroundService.stop(service) }
             return
         }
@@ -152,10 +169,34 @@ class OverlayController(private val service: AccessibilityService) {
             container = null
             lifecycleOwner = null
             isShowing = false
+            abandonAudioFocus()
             // stopService on an already-stopped service is a documented no-op, so this is
             // safe even if show() never got as far as starting it.
             runCatching { InterventionForegroundService.stop(service) }
         }
+    }
+
+    private fun requestAudioFocus() {
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setOnAudioFocusChangeListener { }
+            .build()
+        audioFocusRequest = request
+        val result = runCatching { audioManager.requestAudioFocus(request) }.getOrNull()
+        if (result != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            Log.w(Tag.OVERLAY, "audio focus request result=$result; video audio may keep playing")
+        }
+    }
+
+    private fun abandonAudioFocus() {
+        val request = audioFocusRequest ?: return
+        audioFocusRequest = null
+        runCatching { audioManager.abandonAudioFocusRequest(request) }
     }
 
     private companion object {
