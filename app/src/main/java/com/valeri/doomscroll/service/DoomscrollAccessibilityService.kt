@@ -129,7 +129,8 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                 invalidateCache()
                 maybeCapture(packageName, event)
                 // Also warms the cache so the first scroll doesn't pay for classification.
-                countDoomscrollTime(packageName, classify(packageName, event.className))
+                val result = classify(packageName, event.className)
+                countDoomscrollTime(packageName, result)
 
                 // Opening any watched app right after tapping "Close the app" is the urge moving
                 // somewhere else, not a fresh visit — put the breath straight back up rather
@@ -138,13 +139,18 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                     val label = if (packageName == lastClosedPackage) CONTEXT_REOPENED else CONTEXT_SWITCHED
                     Log.i(Tag.SERVICE, "FORCE-REOPEN $packageName ($label, closed $lastClosedPackage)")
                     startIntervention(packageName, label)
+                } else {
+                    maybeTriggerInstantly(packageName, result)
                 }
             }
 
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
                 maybeCapture(packageName, event)
                 // Usually a cache hit; only recomputes once the throttle window lapses.
-                countDoomscrollTime(packageName, classify(packageName, event.className))
+                val result = classify(packageName, event.className)
+                countDoomscrollTime(packageName, result)
+                // Switching to the Reels tab is a same-window navigation: content changes only.
+                maybeTriggerInstantly(packageName, result)
             }
 
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
@@ -152,12 +158,27 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                 val result = classify(packageName, event.className)
                 countDoomscrollTime(packageName, result)
                 if (result.screenClass != ScreenClass.DOOMSCROLL) return
-                if (!sessions.onDoomscrollScroll(packageName)) return
+                if (!sessions.onDoomscrollScroll(packageName, instant = isInstant(result))) return
 
                 Log.i(Tag.SERVICE, "TRIGGER $packageName (${result.describe})")
                 startIntervention(packageName, result.matchedRule?.pattern ?: "unknown")
             }
         }
+    }
+
+    private fun isInstant(result: RuleEngine.Classification) =
+        result.screenClass == ScreenClass.DOOMSCROLL &&
+            result.matchedRule?.pattern in DetectionConfig.INSTANT_PATTERNS
+
+    /**
+     * Fires on simply being on an instant screen (Reels), no scroll needed. SessionTracker's
+     * arming is what keeps this to once per session despite content changes arriving constantly.
+     */
+    private fun maybeTriggerInstantly(packageName: String, result: RuleEngine.Classification) {
+        if (overlay.isShowing || !isInstant(result)) return
+        if (!sessions.onDoomscrollScroll(packageName, instant = true)) return
+        Log.i(Tag.SERVICE, "TRIGGER-INSTANT $packageName (${result.describe})")
+        startIntervention(packageName, result.matchedRule?.pattern ?: "unknown")
     }
 
     /** Stops the doomscroll clock on this thread, where it lives, before handing off. */

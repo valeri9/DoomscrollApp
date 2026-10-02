@@ -227,6 +227,26 @@ class SessionTrackerTest {
     }
 
     @Test
+    fun `an instant screen fires on the first event, without scrolls or dwell`() {
+        val t = tracker()
+        t.noteActivity(pkg)
+        assertTrue("opening Reels must fire straight away", t.onDoomscrollScroll(pkg, instant = true))
+    }
+
+    @Test
+    fun `an instant screen still fires only once per session`() {
+        // Content changes arrive constantly while a reel plays; each one checks again.
+        val t = tracker()
+        t.noteActivity(pkg)
+        assertTrue(t.onDoomscrollScroll(pkg, instant = true))
+        repeat(50) {
+            now += 1_000
+            t.noteActivity(pkg)
+            assertFalse(t.onDoomscrollScroll(pkg, instant = true))
+        }
+    }
+
+    @Test
     fun `first ever launch is armed immediately`() {
         val t = tracker()
         t.noteActivity(pkg)

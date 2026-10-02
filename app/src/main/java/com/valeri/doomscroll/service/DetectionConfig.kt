@@ -20,6 +20,14 @@ object DetectionConfig {
     const val MIN_DWELL_MS = 8_000L
 
     /**
+     * Doomscroll rules whose screen triggers the moment it's open, skipping the scroll and dwell
+     * thresholds above. Those thresholds exist for the home feed, where the story tray and the
+     * first post or two are usually friends, not scrolling yet. Reels has no such lead-in, and
+     * since a reel is watched before it's swiped, waiting for 5 swipes took about a minute.
+     */
+    val INSTANT_PATTERNS = setOf("clips_viewer_view_pager")
+
+    /**
      * Re-arm during a single long sitting. Without this you get one intervention no matter how
      * long you keep scrolling, which is too lenient to be much use.
      */

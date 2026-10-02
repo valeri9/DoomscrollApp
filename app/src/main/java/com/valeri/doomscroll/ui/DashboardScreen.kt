@@ -170,7 +170,8 @@ private fun HeroTile(state: DashboardState, importing: Boolean) {
         }
         if (state.trackingSince == null || state.trackingSince == state.today) {
             Text(
-                "Doomscroll time is measured from today on — earlier days only have app time.",
+                "Counting started when this update was installed today, so doomscrolling earlier " +
+                    "today and on previous days isn't included. Tomorrow is the first full day.",
                 color = Palette.TextMuted,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 10.dp),
@@ -448,6 +449,8 @@ fun formatDuration(ms: Long): String {
     return when {
         hours > 0 -> "${hours}h ${minutes}m"
         totalMinutes > 0 -> "${minutes}m"
+        // A few seconds of doomscrolling flooring to "0m" reads as "nothing was measured".
+        ms >= 1_000 -> "${ms / 1_000}s"
         else -> "0m"
     }
 }
