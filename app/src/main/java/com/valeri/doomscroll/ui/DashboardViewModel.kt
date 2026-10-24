@@ -65,7 +65,8 @@ class DashboardViewModel(app: Application) : AndroidViewModel(app) {
     fun importIfNeeded() = viewModelScope.launch {
         withContext(Dispatchers.IO) {
             if (importer.hasBackfilled()) {
-                importer.syncRecent()
+                // Uncaught here, a failing sync crashed the app on opening the dashboard.
+                runCatching { importer.syncRecent() }
                 return@withContext
             }
             _importing.value = true

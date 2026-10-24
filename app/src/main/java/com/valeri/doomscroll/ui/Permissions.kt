@@ -4,6 +4,7 @@ import android.app.AppOpsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Process
 import android.provider.Settings
 import com.valeri.doomscroll.service.DoomscrollAccessibilityService
@@ -26,12 +27,18 @@ object Permissions {
 
     fun hasUsageAccess(context: Context): Boolean {
         val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
-        val mode = appOps.checkOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS,
-            Process.myUid(),
-            context.packageName,
-            null,
-        )
+        // The four-argument checkOpNoThrow is API 36 only; on anything older it throws
+        // NoSuchMethodError and takes the dashboard down with it.
+        val op = AppOpsManager.OPSTR_GET_USAGE_STATS
+        val uid = Process.myUid()
+        val mode = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA ->
+                appOps.checkOpNoThrow(op, uid, context.packageName, null)
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ->
+                @Suppress("DEPRECATION") appOps.unsafeCheckOpNoThrow(op, uid, context.packageName)
+            else ->
+                @Suppress("DEPRECATION") appOps.checkOpNoThrow(op, uid, context.packageName)
+        }
         return mode == AppOpsManager.MODE_ALLOWED
     }
 

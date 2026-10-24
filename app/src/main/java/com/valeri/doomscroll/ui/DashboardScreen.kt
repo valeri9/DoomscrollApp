@@ -358,14 +358,15 @@ private fun RangeChips(range: Int, onChange: (Int) -> Unit) {
 @Composable
 private fun AppRow(app: AppStat, maxMs: Long) {
     val context = LocalContext.current
-    val icon = AppCatalog.iconFor(context, app.packageName)
+    val icon = remember(app.packageName) { AppCatalog.iconFor(context, app.packageName) }
+    val label = remember(app.packageName) { AppCatalog.labelFor(context, app.packageName) }
     Column(Modifier.padding(vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (icon != null) {
                 Image(icon, contentDescription = null, modifier = Modifier.size(22.dp))
             }
             Text(
-                AppCatalog.labelFor(context, app.packageName),
+                label,
                 color = Palette.TextPrimary,
                 fontSize = 14.sp,
                 modifier = Modifier.weight(1f).padding(start = if (icon != null) 10.dp else 0.dp),

@@ -18,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -74,8 +75,10 @@ fun SettingsScreen(
                 )
             }
             apps.forEach { app ->
-                val label = AppCatalog.labelFor(context, app.packageName)
-                val icon = AppCatalog.iconFor(context, app.packageName)
+                // Remembered: loading and rasterising the icon on every recomposition redid it for
+                // every app on each tap of a stepper on this screen.
+                val label = remember(app.packageName) { AppCatalog.labelFor(context, app.packageName) }
+                val icon = remember(app.packageName) { AppCatalog.iconFor(context, app.packageName) }
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

@@ -221,6 +221,13 @@ class DoomscrollAccessibilityService : AccessibilityService() {
     }
 
     private suspend fun intervene(packageName: String, contextLabel: String) {
+        // Checked here, before going home, not just in overlay.show(): without the permission
+        // there's nothing to show, so going ahead would just throw the user out of the app with
+        // no explanation and log an intervention that never happened.
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            Log.w(Tag.SERVICE, "overlay permission missing; skipping intervention for $packageName")
+            return
+        }
         val current = settings
         val isNight = current.isNight()
 

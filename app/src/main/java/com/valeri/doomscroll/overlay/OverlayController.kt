@@ -153,7 +153,11 @@ class OverlayController(private val service: AccessibilityService) {
         container = view
         lifecycleOwner = owner
         owner.onResume()
-        mainHandler.postDelayed(safetyDismiss, SAFETY_TIMEOUT_MS)
+        // Measured from what this intervention can legitimately take, not a fixed figure: night
+        // escalation has no ceiling, and a fixed 5 minutes cut off the breathing countdown
+        // mid-way once enough reopens in one night pushed it past that.
+        val expectedMs = (spec.breathingSeconds + spec.continueDelaySeconds) * 1000L
+        mainHandler.postDelayed(safetyDismiss, expectedMs + SAFETY_MARGIN_MS)
         Log.i(Tag.OVERLAY, "shown for ${spec.packageName} (${spec.contextLabel}, night=${spec.isNight})")
     }
 
@@ -200,6 +204,7 @@ class OverlayController(private val service: AccessibilityService) {
     }
 
     private companion object {
-        const val SAFETY_TIMEOUT_MS = 5 * 60 * 1000L
+        /** How long past the countdowns the overlay may stay up before it's taken down regardless. */
+        const val SAFETY_MARGIN_MS = 5 * 60 * 1000L
     }
 }
