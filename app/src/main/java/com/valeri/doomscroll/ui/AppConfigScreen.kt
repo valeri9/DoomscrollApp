@@ -48,7 +48,6 @@ fun AppConfigScreen(
 ) {
     val context = LocalContext.current
     val rules by vm.rulesFor(packageName).collectAsStateWithLifecycle(emptyList())
-    val reasons by vm.reasonsFor(packageName).collectAsStateWithLifecycle(emptyList())
     val apps by vm.monitoredApps.collectAsStateWithLifecycle()
     val app = apps.firstOrNull { it.packageName == packageName }
 
@@ -109,39 +108,6 @@ fun AppConfigScreen(
             }
         }
         AddRuleForm(packageName, vm)
-
-        SectionHeader("Reasons offered")
-        SettingsCard {
-            reasons.forEach { reason ->
-                // The last reason can't be removed — an empty list would leave the "why are
-                // you here" prompt with nothing to offer.
-                val isLastOne = reasons.size <= 1
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(reason.label, color = Palette.TextPrimary, fontSize = 14.sp)
-                        val subtitle = when {
-                            isLastOne -> "Last reason — can't be removed"
-                            reason.packageName == null -> "Shown for every app"
-                            else -> null
-                        }
-                        if (subtitle != null) {
-                            Text(subtitle, color = Palette.TextMuted, fontSize = 11.sp)
-                        }
-                    }
-                    IconButton(
-                        onClick = { vm.deleteReason(reason) },
-                        enabled = !isLastOne,
-                        modifier = Modifier.size(34.dp),
-                    ) {
-                        Icon(Icons.Default.Close, "Delete reason", tint = Palette.TextMuted)
-                    }
-                }
-            }
-        }
-        AddReasonForm(packageName, vm)
     }
 }
 
@@ -240,33 +206,6 @@ private fun AddRuleForm(packageName: String, vm: SettingsViewModel) {
             enabled = pattern.isNotBlank(),
         ) {
             Text("Add rule", color = if (pattern.isNotBlank()) Palette.Mist else Palette.TextMuted)
-        }
-    }
-}
-
-@Composable
-private fun AddReasonForm(packageName: String, vm: SettingsViewModel) {
-    var label by remember { mutableStateOf("") }
-    Column(Modifier.padding(top = 10.dp)) {
-        OutlinedTextField(
-            value = label,
-            onValueChange = { label = it },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("New reason for this app", color = Palette.TextMuted) },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Palette.TextPrimary,
-                unfocusedTextColor = Palette.TextPrimary,
-                focusedBorderColor = Palette.Mist,
-                unfocusedBorderColor = Palette.SurfaceAlt,
-                cursorColor = Palette.Mist,
-            ),
-        )
-        TextButton(
-            onClick = { vm.addReason(packageName, label); label = "" },
-            enabled = label.isNotBlank(),
-        ) {
-            Text("Add reason", color = if (label.isNotBlank()) Palette.Mist else Palette.TextMuted)
         }
     }
 }

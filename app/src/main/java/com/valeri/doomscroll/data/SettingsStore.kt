@@ -16,7 +16,7 @@ import java.time.LocalTime
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 /**
- * Global tuning. Per-app data (which apps, which rules, which reasons) lives in Room; only
+ * Global tuning. Per-app data (which apps, which rules) lives in Room; only
  * these scalars are here.
  */
 data class Settings(
@@ -26,7 +26,6 @@ data class Settings(
     val nightBreathingSeconds: Int = 45,
     val nightEscalationSeconds: Int = 10,
     val nightContinueDelaySeconds: Int = 5,
-    val nightMinReasonChars: Int = 15,
     // These four restated DetectionConfig's constants as independent literals — two sources
     // of truth for the same tuning defaults that had to be hand-edited in lockstep (see the
     // commit lowering the re-arm default from 10 to 4 minutes) and could easily drift apart
@@ -76,7 +75,6 @@ class SettingsStore(private val context: Context) {
         val nightBreathing = intPreferencesKey("night_breathing_seconds")
         val nightEscalation = intPreferencesKey("night_escalation_seconds")
         val nightContinueDelay = intPreferencesKey("night_continue_delay_seconds")
-        val nightMinChars = intPreferencesKey("night_min_reason_chars")
         val cooldown = intPreferencesKey("cooldown_minutes")
         val minScrolls = intPreferencesKey("min_scroll_events")
         val minDwell = intPreferencesKey("min_dwell_seconds")
@@ -94,7 +92,6 @@ class SettingsStore(private val context: Context) {
             nightBreathingSeconds = prefs[Keys.nightBreathing] ?: defaults.nightBreathingSeconds,
             nightEscalationSeconds = prefs[Keys.nightEscalation] ?: defaults.nightEscalationSeconds,
             nightContinueDelaySeconds = prefs[Keys.nightContinueDelay] ?: defaults.nightContinueDelaySeconds,
-            nightMinReasonChars = prefs[Keys.nightMinChars] ?: defaults.nightMinReasonChars,
             cooldownMinutes = prefs[Keys.cooldown] ?: defaults.cooldownMinutes,
             minScrollEvents = prefs[Keys.minScrolls] ?: defaults.minScrollEvents,
             minDwellSeconds = prefs[Keys.minDwell] ?: defaults.minDwellSeconds,
@@ -112,7 +109,6 @@ class SettingsStore(private val context: Context) {
     suspend fun setNightBreathing(seconds: Int) = edit { it[Keys.nightBreathing] = seconds }
     suspend fun setNightEscalation(seconds: Int) = edit { it[Keys.nightEscalation] = seconds }
     suspend fun setNightContinueDelay(seconds: Int) = edit { it[Keys.nightContinueDelay] = seconds }
-    suspend fun setNightMinReasonChars(chars: Int) = edit { it[Keys.nightMinChars] = chars }
     suspend fun setCooldownMinutes(minutes: Int) = edit { it[Keys.cooldown] = minutes }
     suspend fun setMinScrollEvents(count: Int) = edit { it[Keys.minScrolls] = count }
     suspend fun setMinDwellSeconds(seconds: Int) = edit { it[Keys.minDwell] = seconds }

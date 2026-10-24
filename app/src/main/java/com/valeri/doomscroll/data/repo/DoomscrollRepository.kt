@@ -8,7 +8,6 @@ import com.valeri.doomscroll.data.db.ContextRuleEntity
 import com.valeri.doomscroll.data.db.DoomscrollDatabase
 import com.valeri.doomscroll.data.db.InterventionEntity
 import com.valeri.doomscroll.data.db.MonitoredAppEntity
-import com.valeri.doomscroll.data.db.ReasonEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -35,13 +34,13 @@ class DoomscrollRepository private constructor(context: Context) {
      * (on connect) and the settings screen (on open), which can run at the same moment on a
      * fresh install. Without this, both callers can pass the "is anything seeded yet" check
      * before either has inserted anything, and each then runs its own delete-then-insert —
-     * producing two copies of every built-in rule and default reason. The check and the write
+     * producing two copies of every built-in rule. The check and the write
      * must be one atomic step, not two.
      */
     private val seedMutex = Mutex()
 
     /**
-     * Seeds the shipped rules, apps and reasons the first time the database is opened.
+     * Seeds the shipped rules and apps the first time the database is opened.
      * Done lazily rather than in a Room callback so it can be re-checked cheaply and stays
      * ordinary suspending code.
      */
@@ -59,11 +58,6 @@ class DoomscrollRepository private constructor(context: Context) {
             BuiltInRules.defaultMonitoredPackages.forEach {
                 db.monitoredApps().upsert(MonitoredAppEntity(packageName = it))
             }
-        }
-        if (db.reasons().count() == 0) {
-            db.reasons().insertAll(DEFAULT_REASONS.mapIndexed { i, label ->
-                ReasonEntity(packageName = null, label = label, sortOrder = i)
-            })
         }
     }
 
@@ -121,37 +115,6 @@ class DoomscrollRepository private constructor(context: Context) {
     suspend fun monitoredPackagesNow(): Set<String> =
         db.monitoredApps().getAll().filter { it.enabled }.map { it.packageName }.toSet()
 
-    // --- reasons -----------------------------------------------------------------------
-
-    suspend fun reasonsFor(packageName: String): List<String> =
-        db.reasons().forPackage(packageName).map { it.label }
-
-    fun observeReasonsFor(packageName: String): Flow<List<ReasonEntity>> =
-        db.reasons().observeForPackage(packageName)
-
-    /** Same accidental-duplicate risk as addRule() above, from the Add reason form. */
-    suspend fun addReason(packageName: String?, label: String): Long {
-        val exists = db.reasons().forPackage(packageName ?: "").any {
-            it.packageName == packageName && it.label.equals(label, ignoreCase = true)
-        }
-        if (exists) return -1
-        return db.reasons().insert(ReasonEntity(packageName = packageName, label = label))
-    }
-
-    /**
-     * Refuses to delete the last reason visible to a package. An empty reason list isn't
-     * just confusing in Settings — InterventionScreen's tap-to-pick step is now written to
-     * tolerate it (an empty list auto-satisfies the submit gate rather than trapping the
-     * user), but there is no reason to let the app reach a state where the "why are you
-     * here" prompt has nothing to offer in the first place.
-     */
-    suspend fun deleteReason(reason: ReasonEntity): Boolean {
-        val remaining = db.reasons().forPackage(reason.packageName ?: "").size
-        if (remaining <= 1) return false
-        db.reasons().delete(reason)
-        return true
-    }
-
     // --- interventions -----------------------------------------------------------------
 
     suspend fun startIntervention(
@@ -179,8 +142,8 @@ class DoomscrollRepository private constructor(context: Context) {
         )
     }
 
-    suspend fun completeIntervention(id: Long, label: String?, text: String?, continued: Boolean) =
-        db.interventions().complete(id, label, text, continued, System.currentTimeMillis())
+    suspend fun completeIntervention(id: Long, continued: Boolean) =
+        db.interventions().complete(id, continued, System.currentTimeMillis())
 
     suspend fun nightInterventionsSince(since: Long): Int = db.interventions().countNightSince(since)
 
@@ -204,14 +167,6 @@ class DoomscrollRepository private constructor(context: Context) {
 
         /** contextLabel for a prompt forced by opening a different watched app right after closing one. */
         const val CONTEXT_SWITCHED = "switched apps after closing"
-
-        private val DEFAULT_REASONS = listOf(
-            "Bored",
-            "Habit",
-            "Came for something specific",
-            "Got sidetracked from DMs",
-            "Avoiding something",
-        )
 
         @Volatile private var instance: DoomscrollRepository? = null
 

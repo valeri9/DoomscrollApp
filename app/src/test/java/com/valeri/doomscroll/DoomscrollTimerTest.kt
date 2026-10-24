@@ -84,4 +84,47 @@ class DoomscrollTimerTest {
         assertEquals(0L, t.pendingMs)
         assertTrue(t.drain().isEmpty())
     }
+
+    @Test
+    fun `a long gap is credited only as far as the app was really in front`() {
+        var asked: Triple<String, Long, Long>? = null
+        val t = DoomscrollTimer(
+            maxGapMs = 60_000L,
+            checkGapMs = 10_000L,
+            foregroundMs = { pkg, from, to -> asked = Triple(pkg, from, to); 12_000L },
+            zone = { ZoneOffset.UTC },
+            now = { now },
+        )
+        val start = now
+        t.onEvent(ig, true)
+        now += 40_000 // went home for most of it
+        t.onEvent(ig, true)
+
+        assertEquals(Triple(ig, start, start + 40_000), asked)
+        assertEquals(mapOf((day to ig) to 12_000L), t.drain())
+    }
+
+    @Test
+    fun `short gaps never consult the usage log`() {
+        val t = DoomscrollTimer(
+            maxGapMs = 60_000L,
+            checkGapMs = 10_000L,
+            foregroundMs = { _, _, _ -> error("must not be asked") },
+            zone = { ZoneOffset.UTC },
+            now = { now },
+        )
+        t.onEvent(ig, true)
+        now += 8_000
+        t.onEvent(ig, true)
+        assertEquals(mapOf((day to ig) to 8_000L), t.drain())
+    }
+
+    @Test
+    fun `an unknown answer credits the whole gap as before`() {
+        val t = DoomscrollTimer(maxGapMs = 60_000L, checkGapMs = 10_000L, zone = { ZoneOffset.UTC }, now = { now })
+        t.onEvent(ig, true)
+        now += 30_000
+        t.onEvent(ig, true)
+        assertEquals(mapOf((day to ig) to 30_000L), t.drain())
+    }
 }

@@ -7,11 +7,9 @@ import com.valeri.doomscroll.classifier.MatchType
 import com.valeri.doomscroll.classifier.RuleKind
 import com.valeri.doomscroll.data.Settings
 import com.valeri.doomscroll.data.db.ContextRuleEntity
-import com.valeri.doomscroll.data.db.ReasonEntity
 import com.valeri.doomscroll.data.repo.DoomscrollRepository
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -30,10 +28,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun rulesFor(packageName: String) = repo.rulesForPackage(packageName)
-    fun reasonsFor(packageName: String) = repo.observeReasonsFor(packageName)
-
-    /** Reasons that apply to every app, shown when editing the shared list. */
-    val globalReasons = repo.observeReasonsFor("").map { list -> list.filter { it.packageName == null } }
 
     fun addApp(packageName: String) = viewModelScope.launch { repo.addMonitoredApp(packageName) }
     fun setAppEnabled(packageName: String, enabled: Boolean) =
@@ -61,13 +55,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteRule(rule: ContextRuleEntity) = viewModelScope.launch { repo.deleteRule(rule) }
 
-    fun addReason(packageName: String?, label: String) = viewModelScope.launch {
-        val cleaned = label.trim()
-        if (cleaned.isNotEmpty()) repo.addReason(packageName, cleaned)
-    }
-
-    fun deleteReason(reason: ReasonEntity) = viewModelScope.launch { repo.deleteReason(reason) }
-
     fun setNightWindow(startMinute: Int, endMinute: Int) =
         viewModelScope.launch { repo.settingsStore.setNightWindow(startMinute, endMinute) }
 
@@ -75,7 +62,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setNightBreathing(seconds: Int) = viewModelScope.launch { repo.settingsStore.setNightBreathing(seconds) }
     fun setNightEscalation(seconds: Int) = viewModelScope.launch { repo.settingsStore.setNightEscalation(seconds) }
     fun setNightContinueDelay(seconds: Int) = viewModelScope.launch { repo.settingsStore.setNightContinueDelay(seconds) }
-    fun setNightMinChars(chars: Int) = viewModelScope.launch { repo.settingsStore.setNightMinReasonChars(chars) }
     fun setCooldown(minutes: Int) = viewModelScope.launch { repo.settingsStore.setCooldownMinutes(minutes) }
     fun setMinScrolls(count: Int) = viewModelScope.launch { repo.settingsStore.setMinScrollEvents(count) }
     fun setMinDwell(seconds: Int) = viewModelScope.launch { repo.settingsStore.setMinDwellSeconds(seconds) }

@@ -71,6 +71,12 @@ object DetectionConfig {
      */
     const val DOOMSCROLL_MAX_GAP_MS = 60 * 1000L
 
+    /**
+     * Gaps longer than this are checked against the OS usage log before being credited, so a
+     * quick trip home in the middle doesn't count as doomscrolling. See DoomscrollTimer.
+     */
+    const val DOOMSCROLL_CHECK_GAP_MS = 10 * 1000L
+
     /** Counted doomscroll time is written to the database in batches of at least this much. */
     const val DOOMSCROLL_FLUSH_MS = 15 * 1000L
 }

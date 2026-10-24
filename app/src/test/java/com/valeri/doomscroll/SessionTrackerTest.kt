@@ -349,6 +349,26 @@ class SessionTrackerTest {
     }
 
     @Test
+    fun `a trigger that fails its fresh check does not fire or count`() {
+        // A cached feed result while the screen is really a DM thread now.
+        val t = tracker()
+        t.noteActivity(pkg)
+        now += 10_000
+        repeat(2) { assertFalse(t.onDoomscrollScroll(pkg)) }
+        assertFalse(t.onDoomscrollScroll(pkg, confirm = { false }))
+        assertTrue("still armed, and the rejected scroll wasn't counted", t.onDoomscrollScroll(pkg))
+    }
+
+    @Test
+    fun `an instant trigger that fails its fresh check stays armed`() {
+        val t = tracker()
+        t.noteActivity(pkg)
+        t.onInstantScreen(pkg, itemIndex = 0)
+        assertFalse(t.onInstantScreen(pkg, itemIndex = 1, confirm = { false }))
+        assertTrue(t.onInstantScreen(pkg, itemIndex = 2))
+    }
+
+    @Test
     fun `first ever launch is armed immediately`() {
         val t = tracker()
         t.noteActivity(pkg)

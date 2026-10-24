@@ -136,20 +136,11 @@ fun SettingsScreen(
             )
             StepperRow(
                 title = "Continue delay",
-                subtitle = "Continue stays greyed out this long after your reason",
+                subtitle = "Continue stays greyed out this long after the breathing ends",
                 value = settings.nightContinueDelaySeconds,
                 unit = "s",
                 range = 0..60,
                 onChange = vm::setNightContinueDelay,
-            )
-            StepperRow(
-                title = "Minimum reason length",
-                subtitle = "Characters required in the typed sentence",
-                value = settings.nightMinReasonChars,
-                unit = "",
-                range = 0..120,
-                step = 5,
-                onChange = vm::setNightMinChars,
             )
         }
 

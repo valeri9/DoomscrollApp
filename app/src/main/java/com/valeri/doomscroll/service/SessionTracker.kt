@@ -96,8 +96,12 @@ class SessionTracker(
     /**
      * Records a scroll on a screen already classified as doomscroll.
      * Returns true once per session, and again each time reArmAfterMs elapses.
+     *
+     * confirm is asked right before firing, and only then: the caller's classification may come
+     * from a cache, and a stale one must never fire. If it says no, nothing fires and the scroll
+     * isn't counted.
      */
-    fun onDoomscrollScroll(packageName: String): Boolean {
+    fun onDoomscrollScroll(packageName: String, confirm: () -> Boolean = { true }): Boolean {
         val state = states.getOrPut(packageName) { State() }
         val moment = now()
         if (inLegitHold(state, moment) || !armOrReArm(state, moment)) return false
@@ -107,6 +111,10 @@ class SessionTracker(
         state.scrollEvents++
         val dwelled = moment - state.sessionStartedAt >= minDwellMs
         if (state.scrollEvents < minScrollEvents || !dwelled) return false
+        if (!confirm()) {
+            state.scrollEvents--
+            return false
+        }
         return fire(state, moment)
     }
 
@@ -118,8 +126,9 @@ class SessionTracker(
      *
      * itemIndex is the pager position carried by a scroll event, or -1 for events without one.
      * A swipe is a change in that position; a scroll event at the same position is just layout.
+     * confirm works as in onDoomscrollScroll.
      */
-    fun onInstantScreen(packageName: String, itemIndex: Int = -1): Boolean {
+    fun onInstantScreen(packageName: String, itemIndex: Int = -1, confirm: () -> Boolean = { true }): Boolean {
         val state = states.getOrPut(packageName) { State() }
         val moment = now()
         if (state.instantSince == 0L || moment - state.instantLastAt > instantContinuityMs) {
@@ -133,7 +142,7 @@ class SessionTracker(
 
         if (inLegitHold(state, moment)) return false
         if (!swiped && moment - state.instantSince < instantGraceMs) return false
-        if (!armOrReArm(state, moment)) return false
+        if (!armOrReArm(state, moment) || !confirm()) return false
         return fire(state, moment)
     }
 

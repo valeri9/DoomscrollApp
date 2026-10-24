@@ -16,10 +16,19 @@ import java.time.ZoneId
  * watched for longer than maxGapMs without one accessibility event is undercounted — erring low
  * is the right direction for a number meant to be taken seriously.
  *
+ * A shorter silence is ambiguous the same way — one long reel, or a quick trip home — and used
+ * to be credited in full, so every brief exit added up to a minute that was never spent
+ * scrolling. Gaps over checkGapMs are now checked against the OS usage log via foregroundMs,
+ * which says how much of the gap the app really spent in front; only that much is credited.
+ * Short gaps, the overwhelming majority, are credited without asking.
+ *
  * Not thread-safe: only called from the accessibility event thread.
  */
 class DoomscrollTimer(
     private val maxGapMs: Long = DetectionConfig.DOOMSCROLL_MAX_GAP_MS,
+    private val checkGapMs: Long = DetectionConfig.DOOMSCROLL_CHECK_GAP_MS,
+    /** How long packageName was really in front between from and to; null when it can't tell. */
+    private val foregroundMs: (packageName: String, from: Long, to: Long) -> Long? = { _, _, _ -> null },
     private val zone: () -> ZoneId = ZoneId::systemDefault,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
@@ -55,8 +64,14 @@ class DoomscrollTimer(
         openPackage = null
         val gap = moment - openSince
         if (gap <= 0L || gap > maxGapMs) return
+        val credited = if (gap > checkGapMs) {
+            foregroundMs(pkg, openSince, moment)?.coerceIn(0L, gap) ?: gap
+        } else {
+            gap
+        }
+        if (credited <= 0L) return
         val key = Instant.ofEpochMilli(openSince).atZone(zone()).toLocalDate() to pkg
-        pending[key] = (pending[key] ?: 0L) + gap
-        pendingMs += gap
+        pending[key] = (pending[key] ?: 0L) + credited
+        pendingMs += credited
     }
 }

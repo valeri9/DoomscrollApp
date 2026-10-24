@@ -107,20 +107,13 @@ class OverlayController(private val service: AccessibilityService) {
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            // Focusable on purpose: it makes the window modal, lets us intercept BACK, and is
-            // a prerequisite for the IME reaching the typed-reason field at night. A
-            // FLAG_NOT_FOCUSABLE window silently refuses keyboard input.
+            // Focusable on purpose: it makes the window modal and lets us intercept BACK.
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                 WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            // Deprecated in favour of the insets API, which assumes an Activity window with
-            // decor. This window has neither, and ADJUST_RESIZE is what actually gets the
-            // keyboard to move the typed-reason field into view. Verify on device.
-            @Suppress("DEPRECATION")
-            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
 
         // Started before addView, not after: the window being on top of everything does

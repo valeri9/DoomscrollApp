@@ -79,11 +79,7 @@ fun InterventionScreen(spec: InterventionSpec, onComplete: (InterventionResult) 
                     // Closing must be reachable the moment the urge to stop shows up, not only
                     // once the breathing countdown happens to finish — waiting it out is the
                     // one thing this screen must never demand of someone who already wants out.
-                    onClose = {
-                        onComplete(
-                            InterventionResult(reasonLabel = null, reasonText = null, continuedAnyway = false)
-                        )
-                    },
+                    onClose = { onComplete(InterventionResult(continuedAnyway = false)) },
                 )
             } else {
                 ChoicePane(spec = spec, onComplete = onComplete)
@@ -188,9 +184,7 @@ private fun ChoicePane(spec: InterventionSpec, onComplete: (InterventionResult) 
     }
     val canContinue = continueDelay == 0
 
-    fun complete(continuedAnyway: Boolean) = onComplete(
-        InterventionResult(reasonLabel = null, reasonText = null, continuedAnyway = continuedAnyway)
-    )
+    fun complete(continuedAnyway: Boolean) = onComplete(InterventionResult(continuedAnyway))
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,

@@ -32,19 +32,6 @@ data class ContextRuleEntity(
     val isBuiltIn: Boolean = false,
 )
 
-/** A quick-tap answer offered on the "why are you here" prompt. */
-@Entity(
-    tableName = "reasons",
-    indices = [Index(value = ["packageName"])],
-)
-data class ReasonEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    /** null means it's offered for every app. */
-    val packageName: String?,
-    val label: String,
-    val sortOrder: Int = 0,
-)
-
 /** One intervention, start to finish. */
 @Entity(
     tableName = "interventions",
@@ -61,6 +48,7 @@ data class InterventionEntity(
     val hourOfDay: Int,
     val isNightMode: Boolean,
     val breathingSeconds: Int,
+    /** Only on interventions from before the reason prompt was dropped; never written now. */
     val reasonLabel: String?,
     val reasonText: String?,
     val continuedAnyway: Boolean,

@@ -17,6 +17,7 @@ import com.valeri.doomscroll.learn.NodeInspector
 import com.valeri.doomscroll.overlay.InterventionForegroundService
 import com.valeri.doomscroll.overlay.InterventionSpec
 import com.valeri.doomscroll.overlay.OverlayController
+import com.valeri.doomscroll.usage.UsageForeground
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,7 +35,7 @@ class DoomscrollAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val ruleEngine = RuleEngine()
     private val sessions = SessionTracker()
-    private val doomscrollTimer = DoomscrollTimer()
+    private val doomscrollTimer = DoomscrollTimer(foregroundMs = UsageForeground(this)::foregroundMs)
 
     /** The app "Close the app" was last tapped in; tells a reopen apart from a hop. Main thread only. */
     private var lastClosedPackage: String? = null
@@ -44,14 +45,25 @@ class DoomscrollAccessibilityService : AccessibilityService() {
     @Volatile private var settings: Settings = Settings()
 
     /**
-     * Cached classification, keyed by the package AND window class it was computed for.
-     * Package alone is not enough: a same-package navigation (e.g. feed -> DM thread) that
-     * fires only TYPE_WINDOW_CONTENT_CHANGED, not TYPE_WINDOW_STATE_CHANGED, never calls
-     * invalidateCache(). Without the class-name key, a scroll on the new (legit) screen
-     * within the throttle window would hit the stale feed classification and trigger.
+     * The class of the window last brought to the front, from TYPE_WINDOW_STATE_CHANGED. Other
+     * events carry the class of whichever view changed or scrolled instead, which is not a
+     * window class at all — and keying the cache on that made consecutive content-change and
+     * scroll events (FrameLayout, RecyclerView, ...) miss each other's cache entries, repeating
+     * a full set of view-id lookups several times a second while a reel played.
+     */
+    private var windowPackage: String? = null
+    private var windowClassName: CharSequence? = null
+
+    /**
+     * Cached classification, keyed by package. The window class needs no key of its own: it
+     * only changes on TYPE_WINDOW_STATE_CHANGED, which clears this cache anyway.
+     *
+     * Same-package navigation (e.g. feed -> DM thread) can arrive as content changes alone,
+     * leaving the cache stale for up to CLASSIFY_THROTTLE_MS. That is fine for counting, but
+     * never for firing: every trigger re-checks the screen fresh first (see confirm in
+     * SessionTracker), so a stale feed result can't put the prompt up over a DM.
      */
     private var cachedPackage: String? = null
-    private var cachedClassName: String? = null
     private var cachedResult: RuleEngine.Classification? = null
     private var cachedAt: Long = 0L
 
@@ -127,9 +139,11 @@ class DoomscrollAccessibilityService : AccessibilityService() {
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 invalidateCache()
+                windowPackage = packageName
+                windowClassName = event.className
                 maybeCapture(packageName, event)
                 // Also warms the cache so the first scroll doesn't pay for classification.
-                val result = classify(packageName, event.className)
+                val result = classify(packageName)
                 countDoomscrollTime(packageName, result)
 
                 // Opening any watched app right after tapping "Close the app" is the urge moving
@@ -147,7 +161,7 @@ class DoomscrollAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
                 maybeCapture(packageName, event)
                 // Usually a cache hit; only recomputes once the throttle window lapses.
-                val result = classify(packageName, event.className)
+                val result = classify(packageName)
                 countDoomscrollTime(packageName, result)
                 // Switching to the Reels tab is a same-window navigation: content changes only.
                 onScreen(packageName, result)
@@ -155,7 +169,7 @@ class DoomscrollAccessibilityService : AccessibilityService() {
 
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
                 if (overlay.isShowing) return
-                val result = classify(packageName, event.className)
+                val result = classify(packageName)
                 countDoomscrollTime(packageName, result)
                 if (isInstant(result)) {
                     // fromIndex is the pager position, so a change in it is a swipe to another reel.
@@ -166,13 +180,16 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                     onScreen(packageName, result)
                     return
                 }
-                if (!sessions.onDoomscrollScroll(packageName)) return
+                if (!sessions.onDoomscrollScroll(packageName, confirm = { stillOnDoomscroll(packageName) })) return
 
                 Log.i(Tag.SERVICE, "TRIGGER $packageName (${result.describe})")
                 startIntervention(packageName, result.matchedRule?.pattern ?: "unknown")
             }
         }
     }
+
+    private fun stillOnDoomscroll(packageName: String) =
+        classify(packageName, fresh = true).screenClass == ScreenClass.DOOMSCROLL
 
     private fun isInstant(result: RuleEngine.Classification) =
         result.screenClass == ScreenClass.DOOMSCROLL &&
@@ -187,7 +204,8 @@ class DoomscrollAccessibilityService : AccessibilityService() {
         when {
             result.screenClass == ScreenClass.LEGIT -> sessions.onLegitScreen(packageName)
             !isInstant(result) -> sessions.onOtherScreen(packageName)
-            !overlay.isShowing && sessions.onInstantScreen(packageName, itemIndex) -> {
+            !overlay.isShowing &&
+                sessions.onInstantScreen(packageName, itemIndex, confirm = { isInstant(classify(packageName, fresh = true)) }) -> {
                 Log.i(Tag.SERVICE, "TRIGGER-INSTANT $packageName (${result.describe})")
                 startIntervention(packageName, result.matchedRule?.pattern ?: "unknown")
             }
@@ -259,20 +277,12 @@ class DoomscrollAccessibilityService : AccessibilityService() {
             contextLabel = contextLabel,
             breathingSeconds = breathingSeconds,
             isNight = isNight,
-            reasons = repo.reasonsFor(packageName),
-            requireTypedReason = isNight,
-            minReasonChars = current.nightMinReasonChars,
             continueDelaySeconds = if (isNight) current.nightContinueDelaySeconds else 0,
         )
 
         overlay.show(spec) { result ->
             scope.launch {
-                repo.completeIntervention(
-                    id = interventionId,
-                    label = result.reasonLabel,
-                    text = result.reasonText,
-                    continued = result.continuedAnyway,
-                )
+                repo.completeIntervention(id = interventionId, continued = result.continuedAnyway)
             }
             if (result.continuedAnyway) {
                 // Already home from the top of this function; bring the same task back to
@@ -300,14 +310,15 @@ class DoomscrollAccessibilityService : AccessibilityService() {
             .onFailure { Log.w(Tag.SERVICE, "could not resume $packageName: ${it.message}") }
     }
 
-    private fun classify(packageName: String, className: CharSequence?): RuleEngine.Classification {
+    /** fresh skips the cache, for the moment a trigger is about to fire. */
+    private fun classify(packageName: String, fresh: Boolean = false): RuleEngine.Classification {
         val now = System.currentTimeMillis()
-        val classNameStr = className?.toString()
         val cached = cachedResult
-        val fresh = now - cachedAt < DetectionConfig.CLASSIFY_THROTTLE_MS
-        if (cached != null && cachedPackage == packageName && cachedClassName == classNameStr && fresh) {
+        val recent = now - cachedAt < DetectionConfig.CLASSIFY_THROTTLE_MS
+        if (!fresh && cached != null && cachedPackage == packageName && recent) {
             return cached
         }
+        val className = windowClassName.takeIf { windowPackage == packageName }
 
         val root: AccessibilityNodeInfo? = try {
             rootInActiveWindow
@@ -322,7 +333,6 @@ class DoomscrollAccessibilityService : AccessibilityService() {
         @Suppress("DEPRECATION")
         root?.recycle()
         cachedPackage = packageName
-        cachedClassName = classNameStr
         cachedResult = result
         cachedAt = now
 
@@ -332,7 +342,6 @@ class DoomscrollAccessibilityService : AccessibilityService() {
 
     private fun invalidateCache() {
         cachedResult = null
-        cachedClassName = null
         cachedAt = 0L
     }
 

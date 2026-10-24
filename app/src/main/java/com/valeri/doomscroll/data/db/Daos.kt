@@ -58,33 +58,12 @@ interface ContextRuleDao {
 }
 
 @Dao
-interface ReasonDao {
-    @Query("SELECT * FROM reasons WHERE packageName = :packageName OR packageName IS NULL ORDER BY sortOrder, id")
-    suspend fun forPackage(packageName: String): List<ReasonEntity>
-
-    @Query("SELECT * FROM reasons WHERE packageName = :packageName OR packageName IS NULL ORDER BY sortOrder, id")
-    fun observeForPackage(packageName: String): Flow<List<ReasonEntity>>
-
-    @Insert
-    suspend fun insert(reason: ReasonEntity): Long
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAll(reasons: List<ReasonEntity>)
-
-    @Delete
-    suspend fun delete(reason: ReasonEntity)
-
-    @Query("SELECT COUNT(*) FROM reasons")
-    suspend fun count(): Int
-}
-
-@Dao
 interface InterventionDao {
     @Insert
     suspend fun insert(intervention: InterventionEntity): Long
 
-    @Query("UPDATE interventions SET reasonLabel = :label, reasonText = :text, continuedAnyway = :continued, completedAt = :completedAt WHERE id = :id")
-    suspend fun complete(id: Long, label: String?, text: String?, continued: Boolean, completedAt: Long)
+    @Query("UPDATE interventions SET continuedAnyway = :continued, completedAt = :completedAt WHERE id = :id")
+    suspend fun complete(id: Long, continued: Boolean, completedAt: Long)
 
     @Query("SELECT * FROM interventions WHERE localDate >= :fromDate")
     fun observeSince(fromDate: String): Flow<List<InterventionEntity>>

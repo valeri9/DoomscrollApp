@@ -31,13 +31,12 @@ class EnumConverters {
     entities = [
         MonitoredAppEntity::class,
         ContextRuleEntity::class,
-        ReasonEntity::class,
         InterventionEntity::class,
         DailyAppUsageEntity::class,
         UsageSyncStateEntity::class,
         DoomscrollTimeEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 @TypeConverters(EnumConverters::class)
@@ -45,7 +44,6 @@ abstract class DoomscrollDatabase : RoomDatabase() {
 
     abstract fun monitoredApps(): MonitoredAppDao
     abstract fun contextRules(): ContextRuleDao
-    abstract fun reasons(): ReasonDao
     abstract fun interventions(): InterventionDao
     abstract fun usage(): UsageDao
     abstract fun doomscrollTime(): DoomscrollTimeDao
@@ -58,7 +56,7 @@ abstract class DoomscrollDatabase : RoomDatabase() {
                 context.applicationContext,
                 DoomscrollDatabase::class.java,
                 "doomscroll.db",
-            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
         }
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -67,6 +65,13 @@ abstract class DoomscrollDatabase : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS `doomscroll_time` (`localDate` TEXT NOT NULL, " +
                         "`packageName` TEXT NOT NULL, `ms` INTEGER NOT NULL, PRIMARY KEY(`localDate`, `packageName`))"
                 )
+            }
+        }
+
+        /** The reason prompt is gone, so the reasons offered on it are too. */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `reasons`")
             }
         }
     }
