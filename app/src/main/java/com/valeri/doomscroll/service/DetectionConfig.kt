@@ -28,6 +28,27 @@ object DetectionConfig {
     val INSTANT_PATTERNS = setOf("clips_viewer_view_pager")
 
     /**
+     * Landing on an instant screen isn't doomscrolling yet: Instagram reopens on whatever screen
+     * it was left on, and a reel a friend sent in DMs opens the same viewer. So an instant screen
+     * fires on the first swipe to another reel, or after this long on it without one — enough
+     * time to tap through to messages or a profile first.
+     */
+    const val INSTANT_GRACE_MS = 10_000L
+
+    /**
+     * A silence this long on an instant screen means the user left and came back, so the grace
+     * period starts over rather than counting the time away towards it.
+     */
+    const val INSTANT_CONTINUITY_MS = 5_000L
+
+    /**
+     * Doomscroll matches this soon after a legit one are ignored. Swiping between friends'
+     * stories briefly detaches the story viewer mid-animation, exposing the feed underneath it,
+     * and a swipe landing in that gap used to count as a feed scroll.
+     */
+    const val LEGIT_HOLD_MS = 1_500L
+
+    /**
      * Re-arm during a single long sitting. Without this you get one intervention no matter how
      * long you keep scrolling, which is too lenient to be much use.
      */

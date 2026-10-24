@@ -14,7 +14,10 @@ package com.valeri.doomscroll.service
  * silence is the signal.
  *
  * State is per app, not per screen: moving between Reels and DMs is one continuous Instagram
- * session, so ducking into messages and back does not earn a fresh pass.
+ * session, so ducking into messages and back does not earn a fresh pass. What a legit screen
+ * (DMs, stories) does reset is progress towards a trigger that hasn't fired yet: scrolls and
+ * dwell on the feed start over when you come back to it, because watching friends' stories for
+ * a minute shouldn't leave the feed one flick away from firing.
  *
  * A third, separate hook — noteClosedByIntervention()/consumeForceReopen() — catches tapping
  * "Close the app" and then opening ANY watched app within the window: the same one again, or
@@ -35,6 +38,9 @@ class SessionTracker(
     /** Re-arm during one long sitting. 0 disables it: one intervention per visit. */
     @Volatile var reArmAfterMs: Long = DetectionConfig.RE_ARM_AFTER_MS,
     @Volatile var cheatReopenWindowMs: Long = DetectionConfig.CHEAT_REOPEN_WINDOW_MS,
+    private val instantGraceMs: Long = DetectionConfig.INSTANT_GRACE_MS,
+    private val instantContinuityMs: Long = DetectionConfig.INSTANT_CONTINUITY_MS,
+    private val legitHoldMs: Long = DetectionConfig.LEGIT_HOLD_MS,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
 
@@ -44,7 +50,18 @@ class SessionTracker(
         var lastSeenAt: Long = 0L,
         var triggeredAt: Long = 0L,
         var scrollEvents: Int = 0,
-    )
+        /** When the user arrived on an instant screen; 0 when not on one. */
+        var instantSince: Long = 0L,
+        var instantLastAt: Long = 0L,
+        /** Pager position last seen on the instant screen, or -1 if none yet. */
+        var instantIndex: Int = -1,
+        var legitAt: Long = 0L,
+    ) {
+        fun leaveInstant() {
+            instantSince = 0L
+            instantIndex = -1
+        }
+    }
 
     private val states = mutableMapOf<String, State>()
 
@@ -66,6 +83,7 @@ class SessionTracker(
             state.scrollEvents = 0
             state.sessionStartedAt = moment
             state.triggeredAt = 0L
+            state.leaveInstant()
         } else if (state.sessionStartedAt == 0L) {
             // The service started while this app was already in front, so no window event
             // ever arrived to start the dwell clock. Start it now, or the dwell check
@@ -78,30 +96,83 @@ class SessionTracker(
     /**
      * Records a scroll on a screen already classified as doomscroll.
      * Returns true once per session, and again each time reArmAfterMs elapses.
-     *
-     * instant skips the scroll-count and dwell thresholds, for screens that are doomscrolling
-     * from the first frame (Reels). Arming still applies, so it fires once per session there
-     * too rather than on every event.
      */
-    fun onDoomscrollScroll(packageName: String, instant: Boolean = false): Boolean {
+    fun onDoomscrollScroll(packageName: String): Boolean {
         val state = states.getOrPut(packageName) { State() }
         val moment = now()
-
-        if (!state.armed) {
-            // Still here, still scrolling, long after the last nudge: nudge again.
-            val since = moment - state.triggeredAt
-            if (reArmAfterMs <= 0L || state.triggeredAt == 0L || since < reArmAfterMs) return false
-            state.armed = true
-            state.scrollEvents = 0
-            state.sessionStartedAt = moment
-        }
+        if (inLegitHold(state, moment) || !armOrReArm(state, moment)) return false
 
         if (state.sessionStartedAt == 0L) state.sessionStartedAt = moment
 
         state.scrollEvents++
         val dwelled = moment - state.sessionStartedAt >= minDwellMs
-        if (!instant && (state.scrollEvents < minScrollEvents || !dwelled)) return false
+        if (state.scrollEvents < minScrollEvents || !dwelled) return false
+        return fire(state, moment)
+    }
 
+    /**
+     * Records any event on an instant screen (Reels), which skips the scroll-count and dwell
+     * thresholds: it is doomscrolling from the first frame. It still waits for a swipe to another
+     * reel, or instantGraceMs there without one — landing on it is not yet scrolling (see
+     * DetectionConfig.INSTANT_GRACE_MS). Arming applies as usual, so it fires once per session.
+     *
+     * itemIndex is the pager position carried by a scroll event, or -1 for events without one.
+     * A swipe is a change in that position; a scroll event at the same position is just layout.
+     */
+    fun onInstantScreen(packageName: String, itemIndex: Int = -1): Boolean {
+        val state = states.getOrPut(packageName) { State() }
+        val moment = now()
+        if (state.instantSince == 0L || moment - state.instantLastAt > instantContinuityMs) {
+            state.instantSince = moment
+            state.instantIndex = -1
+        }
+        state.instantLastAt = moment
+
+        val swiped = itemIndex >= 0 && state.instantIndex >= 0 && itemIndex != state.instantIndex
+        if (itemIndex >= 0) state.instantIndex = itemIndex
+
+        if (inLegitHold(state, moment)) return false
+        if (!swiped && moment - state.instantSince < instantGraceMs) return false
+        if (!armOrReArm(state, moment)) return false
+        return fire(state, moment)
+    }
+
+    /** Call for events on a screen that is neither instant nor legit, so the grace starts over. */
+    fun onOtherScreen(packageName: String) {
+        states[packageName]?.leaveInstant()
+    }
+
+    /**
+     * Call for events on a legit screen (DMs, stories). Starts the hold against stale feed
+     * matches and, if no trigger has fired yet, resets progress towards one.
+     */
+    fun onLegitScreen(packageName: String) {
+        val state = states.getOrPut(packageName) { State() }
+        val moment = now()
+        state.legitAt = moment
+        state.leaveInstant()
+        if (state.armed) {
+            state.scrollEvents = 0
+            state.sessionStartedAt = moment
+        }
+    }
+
+    private fun inLegitHold(state: State, moment: Long) =
+        state.legitAt != 0L && moment - state.legitAt < legitHoldMs
+
+    /** Whether the session is armed, re-arming it first if reArmAfterMs has passed since the last trigger. */
+    private fun armOrReArm(state: State, moment: Long): Boolean {
+        if (state.armed) return true
+        // Still here, still scrolling, long after the last nudge: nudge again.
+        val since = moment - state.triggeredAt
+        if (reArmAfterMs <= 0L || state.triggeredAt == 0L || since < reArmAfterMs) return false
+        state.armed = true
+        state.scrollEvents = 0
+        state.sessionStartedAt = moment
+        return true
+    }
+
+    private fun fire(state: State, moment: Long): Boolean {
         state.armed = false
         state.scrollEvents = 0
         state.triggeredAt = moment

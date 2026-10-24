@@ -140,7 +140,7 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                     Log.i(Tag.SERVICE, "FORCE-REOPEN $packageName ($label, closed $lastClosedPackage)")
                     startIntervention(packageName, label)
                 } else {
-                    maybeTriggerInstantly(packageName, result)
+                    onScreen(packageName, result)
                 }
             }
 
@@ -150,15 +150,23 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                 val result = classify(packageName, event.className)
                 countDoomscrollTime(packageName, result)
                 // Switching to the Reels tab is a same-window navigation: content changes only.
-                maybeTriggerInstantly(packageName, result)
+                onScreen(packageName, result)
             }
 
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
                 if (overlay.isShowing) return
                 val result = classify(packageName, event.className)
                 countDoomscrollTime(packageName, result)
-                if (result.screenClass != ScreenClass.DOOMSCROLL) return
-                if (!sessions.onDoomscrollScroll(packageName, instant = isInstant(result))) return
+                if (isInstant(result)) {
+                    // fromIndex is the pager position, so a change in it is a swipe to another reel.
+                    onScreen(packageName, result, itemIndex = event.fromIndex)
+                    return
+                }
+                if (result.screenClass != ScreenClass.DOOMSCROLL) {
+                    onScreen(packageName, result)
+                    return
+                }
+                if (!sessions.onDoomscrollScroll(packageName)) return
 
                 Log.i(Tag.SERVICE, "TRIGGER $packageName (${result.describe})")
                 startIntervention(packageName, result.matchedRule?.pattern ?: "unknown")
@@ -171,14 +179,19 @@ class DoomscrollAccessibilityService : AccessibilityService() {
             result.matchedRule?.pattern in DetectionConfig.INSTANT_PATTERNS
 
     /**
-     * Fires on simply being on an instant screen (Reels), no scroll needed. SessionTracker's
-     * arming is what keeps this to once per session despite content changes arriving constantly.
+     * Tells SessionTracker which kind of screen an event came from. On an instant screen (Reels)
+     * that alone can fire, no feed scroll needed — after a swipe or the grace period; arming is
+     * what keeps it to once per session despite content changes arriving constantly.
      */
-    private fun maybeTriggerInstantly(packageName: String, result: RuleEngine.Classification) {
-        if (overlay.isShowing || !isInstant(result)) return
-        if (!sessions.onDoomscrollScroll(packageName, instant = true)) return
-        Log.i(Tag.SERVICE, "TRIGGER-INSTANT $packageName (${result.describe})")
-        startIntervention(packageName, result.matchedRule?.pattern ?: "unknown")
+    private fun onScreen(packageName: String, result: RuleEngine.Classification, itemIndex: Int = -1) {
+        when {
+            result.screenClass == ScreenClass.LEGIT -> sessions.onLegitScreen(packageName)
+            !isInstant(result) -> sessions.onOtherScreen(packageName)
+            !overlay.isShowing && sessions.onInstantScreen(packageName, itemIndex) -> {
+                Log.i(Tag.SERVICE, "TRIGGER-INSTANT $packageName (${result.describe})")
+                startIntervention(packageName, result.matchedRule?.pattern ?: "unknown")
+            }
+        }
     }
 
     /** Stops the doomscroll clock on this thread, where it lives, before handing off. */

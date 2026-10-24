@@ -227,10 +227,60 @@ class SessionTrackerTest {
     }
 
     @Test
-    fun `an instant screen fires on the first event, without scrolls or dwell`() {
+    fun `landing on an instant screen does not fire before the grace period`() {
+        // Instagram reopening on Reels, or a reel opened from a DM: time to tap away first.
         val t = tracker()
         t.noteActivity(pkg)
-        assertTrue("opening Reels must fire straight away", t.onDoomscrollScroll(pkg, instant = true))
+        assertFalse(t.onInstantScreen(pkg))
+        repeat(9) {
+            now += 1_000
+            t.noteActivity(pkg)
+            assertFalse("still inside the grace period", t.onInstantScreen(pkg))
+        }
+        now += 1_000
+        t.noteActivity(pkg)
+        assertTrue("10s on Reels without leaving should fire", t.onInstantScreen(pkg))
+    }
+
+    @Test
+    fun `a swipe to another reel fires straight away`() {
+        val t = tracker()
+        t.noteActivity(pkg)
+        assertFalse(t.onInstantScreen(pkg, itemIndex = 4))
+        now += 500
+        assertFalse("same position is layout, not a swipe", t.onInstantScreen(pkg, itemIndex = 4))
+        now += 500
+        assertTrue(t.onInstantScreen(pkg, itemIndex = 5))
+    }
+
+    @Test
+    fun `leaving the instant screen inside the grace period never fires`() {
+        val t = tracker()
+        t.noteActivity(pkg)
+        assertFalse(t.onInstantScreen(pkg))
+        now += 3_000
+        t.noteActivity(pkg)
+        t.onLegitScreen(pkg) // tapped through to DMs
+
+        repeat(60) {
+            now += 1_000
+            t.noteActivity(pkg)
+            t.onLegitScreen(pkg)
+        }
+        // Back to Reels: the grace starts over rather than counting the time in DMs.
+        now += 2_000
+        t.noteActivity(pkg)
+        assertFalse(t.onInstantScreen(pkg))
+    }
+
+    @Test
+    fun `a gap in events on the instant screen restarts the grace`() {
+        val t = tracker()
+        t.noteActivity(pkg)
+        assertFalse(t.onInstantScreen(pkg))
+        now += 8_000 // went home on Reels, came back; well under the cooldown
+        t.noteActivity(pkg)
+        assertFalse("time away must not count towards the grace", t.onInstantScreen(pkg))
     }
 
     @Test
@@ -238,11 +288,63 @@ class SessionTrackerTest {
         // Content changes arrive constantly while a reel plays; each one checks again.
         val t = tracker()
         t.noteActivity(pkg)
-        assertTrue(t.onDoomscrollScroll(pkg, instant = true))
+        t.onInstantScreen(pkg, itemIndex = 0)
+        assertTrue(t.onInstantScreen(pkg, itemIndex = 1))
         repeat(50) {
             now += 1_000
             t.noteActivity(pkg)
-            assertFalse(t.onDoomscrollScroll(pkg, instant = true))
+            assertFalse(t.onInstantScreen(pkg, itemIndex = it + 2))
+        }
+    }
+
+    @Test
+    fun `feed scrolls just after a story are ignored`() {
+        // Swiping between friends' stories briefly exposes the feed underneath.
+        val t = tracker()
+        t.noteActivity(pkg)
+        now += 30_000
+        t.onLegitScreen(pkg)
+        repeat(10) {
+            now += 100
+            assertFalse("inside the hold", t.onDoomscrollScroll(pkg))
+        }
+    }
+
+    @Test
+    fun `coming back from stories starts the feed count over`() {
+        val t = tracker()
+        t.noteActivity(pkg)
+        now += 10_000
+        repeat(2) { assertFalse(t.onDoomscrollScroll(pkg)) } // one short of the threshold
+
+        t.onLegitScreen(pkg) // a minute of stories
+        now += 60_000
+        t.noteActivity(pkg)
+        t.onLegitScreen(pkg)
+
+        now += 2_000 // past the hold, but dwell restarts from leaving the story viewer
+        assertFalse("dwell restarted", t.onDoomscrollScroll(pkg))
+        now += 5_000
+        t.noteActivity(pkg)
+        assertFalse("the two scrolls before stories no longer count", t.onDoomscrollScroll(pkg))
+        assertTrue("a full count after returning fires", t.onDoomscrollScroll(pkg))
+    }
+
+    @Test
+    fun `a legit screen does not hand back a trigger that already fired`() {
+        val t = tracker(reArmAfterMs = 0L)
+        t.noteActivity(pkg)
+        now += 10_000
+        repeat(3) { t.onDoomscrollScroll(pkg) }
+
+        now += 5_000
+        t.noteActivity(pkg)
+        t.onLegitScreen(pkg) // ducking into DMs and back
+        now += 5_000
+        t.noteActivity(pkg)
+        repeat(10) {
+            now += 1_000
+            assertFalse(t.onDoomscrollScroll(pkg))
         }
     }
 
