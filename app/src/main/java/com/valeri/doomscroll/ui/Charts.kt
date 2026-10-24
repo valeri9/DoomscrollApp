@@ -154,8 +154,8 @@ fun DailyBarChart(
 @Composable
 fun HorizontalBar(
     fraction: Float,
-    color: Color = ChartPalette.Teal,
     modifier: Modifier = Modifier,
+    color: Color = ChartPalette.Teal,
     track: Boolean = true,
 ) {
     Canvas(modifier.fillMaxWidth().height(8.dp)) {

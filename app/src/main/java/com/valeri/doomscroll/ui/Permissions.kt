@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Process
 import android.provider.Settings
+import androidx.core.net.toUri
 import com.valeri.doomscroll.service.DoomscrollAccessibilityService
 
 /** Reads the three permissions the app needs, none of which use a runtime dialog. */
@@ -48,7 +49,7 @@ object Permissions {
     fun openOverlaySettings(context: Context) = context.launch(
         Intent(
             Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            android.net.Uri.parse("package:${context.packageName}"),
+            "package:${context.packageName}".toUri(),
         )
     )
 

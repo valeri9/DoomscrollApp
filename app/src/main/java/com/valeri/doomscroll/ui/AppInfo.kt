@@ -3,10 +3,10 @@ package com.valeri.doomscroll.ui
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.createBitmap
 
 data class InstalledApp(
     val packageName: String,
@@ -50,7 +50,7 @@ object AppCatalog {
 
     private fun android.graphics.drawable.Drawable.toImageBitmap(): ImageBitmap {
         val size = 96
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val bitmap = createBitmap(size, size)
         val canvas = Canvas(bitmap)
         setBounds(0, 0, size, size)
         draw(canvas)

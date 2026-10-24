@@ -19,7 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -38,7 +38,7 @@ import com.valeri.doomscroll.ui.theme.Palette
 @Composable
 fun SetupScreen(modifier: Modifier = Modifier, onOpenLearnMode: () -> Unit) {
     val context = LocalContext.current
-    var refreshKey by remember { mutableStateOf(0) }
+    var refreshKey by remember { mutableIntStateOf(0) }
 
     // Permissions are granted in Settings, so re-check every time we come back to the app.
     val lifecycleOwner = LocalLifecycleOwner.current

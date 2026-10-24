@@ -185,6 +185,9 @@ class DoomscrollAccessibilityService : AccessibilityService() {
                 Log.i(Tag.SERVICE, "TRIGGER $packageName (${result.describe})")
                 startIntervention(packageName, result.matchedRule?.pattern ?: "unknown")
             }
+
+            // The rest never arrive: accessibility_service_config.xml subscribes to only these three.
+            else -> Unit
         }
     }
 
